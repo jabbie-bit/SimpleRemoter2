@@ -1604,6 +1604,7 @@ BOOL CMy2015RemoteDlg::OnInitDialog()
     // V2 私钥状态检查
     SubMenu = m_MainMenu.GetSubMenu(1);  // 工具菜单
     std::string v2Key = THIS_CFG.GetStr("settings", "V2PrivateKey", "");
+	m_v2KeyPath = v2Key;
     bool v2KeyValid = !v2Key.empty() && GetFileAttributesA(v2Key.c_str()) != INVALID_FILE_ATTRIBUTES;
     SubMenu->CheckMenuItem(ID_TOOL_V2_PRIVATEKEY, v2KeyValid ? MF_CHECKED : MF_UNCHECKED);
     SubMenu->EnableMenuItem(ID_TOOL_V2_PRIVATEKEY, GetMasterHash() == GetPwdHash() ? MF_ENABLED : MF_GRAYED);
@@ -1748,7 +1749,7 @@ void CMy2015RemoteDlg::InitFrpClients()
 
     if (!m_superPass.empty() && GetUpperHash() == GetPwdHash()) {
         // 检查 V2 私钥配置
-        std::string v2KeyPath = THIS_CFG.GetStr("settings", "V2PrivateKey", "");
+        std::string v2KeyPath = m_v2KeyPath;
         if (v2KeyPath.empty()) {
             CharMsg* msg = new CharMsg(_TR("V2私钥未配置，请通过\"工具→V2私钥设置\"菜单选择私钥文件"));
             PostMessageA(WM_SHOWMESSAGE, (WPARAM)msg, NULL);
@@ -1900,11 +1901,13 @@ void CMy2015RemoteDlg::ApplyFrpSettings()
             cfg.SetStr(udp, "local_port", arr[i]);
             cfg.SetStr(udp, "remote_port", arr[i]);
         }
-        std::string name = "YAMA-FS-" + std::to_string(fileServerPort);
-        cfg.SetStr(name, "type", "tcp");
-        cfg.SetInt(name, "local_port", fileServerPort);
-        cfg.SetInt(name, "remote_port", fileServerPort);
-        cfg.SetStr(name, "proxy_protocol_version", "v2");  // 传递真实客户端 IP
+        if (fileServerPort > 0) {
+            std::string name = "YAMA-FS-" + std::to_string(fileServerPort);
+            cfg.SetStr(name, "type", "tcp");
+            cfg.SetInt(name, "local_port", fileServerPort);
+            cfg.SetInt(name, "remote_port", fileServerPort);
+            cfg.SetStr(name, "proxy_protocol_version", "v2");  // 传递真实客户端 IP
+        }
     }
 }
 
@@ -2304,12 +2307,14 @@ void CMy2015RemoteDlg::UpdateStatusBarStats()
         int month = _ttoi(m_strExpireDate.Mid(4, 2));
         int day = _ttoi(m_strExpireDate.Mid(6, 2));
 
-        // 计算剩余天数
+        // 计算剩余天数（包含今天）
         SYSTEMTIME stExpire = {0}, stNow = {0};
         stExpire.wYear = (WORD)year;
         stExpire.wMonth = (WORD)month;
         stExpire.wDay = (WORD)day;
         GetLocalTime(&stNow);
+        // 归一化到当天 00:00:00，只比较日期部分
+        stNow.wHour = stNow.wMinute = stNow.wSecond = stNow.wMilliseconds = 0;
 
         FILETIME ftExpire, ftNow;
         SystemTimeToFileTime(&stExpire, &ftExpire);
@@ -2321,10 +2326,10 @@ void CMy2015RemoteDlg::UpdateStatusBarStats()
         uliNow.LowPart = ftNow.dwLowDateTime;
         uliNow.HighPart = ftNow.dwHighDateTime;
 
-        // FILETIME 单位是 100ns，转换为天数
-        LONGLONG diffDays = (LONGLONG)(uliExpire.QuadPart - uliNow.QuadPart) / (10000000LL * 60 * 60 * 24);
+        // FILETIME 单位是 100ns，转换为天数，+1 包含到期当天
+        LONGLONG diffDays = (LONGLONG)(uliExpire.QuadPart - uliNow.QuadPart) / (10000000LL * 60 * 60 * 24) + 1;
 
-        if (diffDays < 0) {
+        if (diffDays <= 0) {
             strExpire = _TR("已过期");
         } else {
             CString strDate, strDays;
@@ -4040,7 +4045,7 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
         std::string hmac;
         if (isV2) {
             // V2 续期：使用 ECDSA 签名
-            std::string privateKeyPath = THIS_CFG.GetStr("settings", "V2PrivateKey", "");
+            std::string privateKeyPath = m_v2KeyPath;
             if (!privateKeyPath.empty()) {
                 hmac = signPasswordV2(deviceID, fixedKey, privateKeyPath.c_str());
                 if (hmac.empty()) {
@@ -4422,7 +4427,7 @@ std::string CMy2015RemoteDlg::BuildAuthorizationResponse(const std::string& sn,
         auto parts = splitString(passcode, '-');
         if (parts.size() >= 3) {
             std::string license = parts[0] + "|" + parts[1] + "|" + parts[2];
-            std::string privateKeyPath = THIS_CFG.GetStr("settings", "V2PrivateKey", "");
+            std::string privateKeyPath = m_v2KeyPath;
             if (!privateKeyPath.empty()) {
                 // 计算 snHashPrefix（使用 deviceID/sn，无需等待网络验证即可生成）
                 std::string snHashPrefix = computeSnHashPrefix(sn);
@@ -4437,7 +4442,7 @@ std::string CMy2015RemoteDlg::BuildAuthorizationResponse(const std::string& sn,
     } else {
         // V1 验证成功：第一层返回 Authorization 给下级
         // 注意：授权服务器（有 V2PrivateKey）不应返回 Authorization，因为它不是"第一层"
-        std::string v2PrivateKey = THIS_CFG.GetStr("settings", "V2PrivateKey", "");
+        std::string v2PrivateKey = m_v2KeyPath;
         if (v2PrivateKey.empty()) {
             // 没有 V2 私钥，说明是第一层服务端，可以返回 Authorization
             std::string storedAuthObf = THIS_CFG.GetStr("settings", "Authorization", "");
@@ -4524,7 +4529,7 @@ std::pair<std::string, std::string> CMy2015RemoteDlg::GenerateRenewalInfo(
     std::string newHmac;
     if (isV2) {
         // V2 续期：使用 ECDSA 签名
-        std::string privateKeyPath = THIS_CFG.GetStr("settings", "V2PrivateKey", "");
+        std::string privateKeyPath = m_v2KeyPath;
         if (!privateKeyPath.empty()) {
             newHmac = signPasswordV2(sn, newPasscode, privateKeyPath.c_str());
             if (newHmac.empty()) {
@@ -4700,7 +4705,7 @@ void CMy2015RemoteDlg::UpdateActiveWindow(CONTEXT_OBJECT* ctx)
 
         // 检查并发送预设续期（多点验证）
         SendPendingRenewal(ctx, hb.SN, hb.Passcode, "Heartbeat");
-
+		authorized = authorized ? (!m_v2KeyPath.empty() ? AUTHED_BY_SUPER : AUTHED_BY_ADMIN) : UNAUTHORIZED;
         HeartbeatACK ack = { hb.Time, (char)authorized, (char)isTrail };
         BYTE buf[sizeof(HeartbeatACK) + 1] = { CMD_HEARTBEAT_ACK};
         memcpy(buf + 1, &ack, sizeof(HeartbeatACK));
@@ -7556,7 +7561,7 @@ void CMy2015RemoteDlg::OnToolV2PrivateKey()
     dlg.m_ofn.lpstrTitle = _T("Select V2 Private Key");
 
     // 如果已有配置，设置初始目录
-    std::string existingPath = THIS_CFG.GetStr("settings", "V2PrivateKey", "");
+    std::string existingPath = m_v2KeyPath;
     CString initialDir;
     if (!existingPath.empty()) {
         initialDir = existingPath.c_str();
@@ -7567,6 +7572,7 @@ void CMy2015RemoteDlg::OnToolV2PrivateKey()
 
     if (dlg.DoModal() == IDOK) {
         CString path = dlg.GetPathName();
+		m_v2KeyPath = path.GetString();
         THIS_CFG.SetStr("settings", "V2PrivateKey", path.GetString());
 
         // 显示消息

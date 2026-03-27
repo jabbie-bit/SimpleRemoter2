@@ -225,6 +225,7 @@ public:
     std::vector<size_t> m_FilteredIndices;         // 当前分组过滤后的索引列表
     std::set<std::string> m_GroupList;
     std::string m_selectedGroup;
+	std::string m_v2KeyPath;                      // V2 密钥文件路径
     void RebuildFilteredIndices();                 // 重建过滤索引
     context* GetContextByListIndex(int iItem);     // 根据列表索引获取 context（考虑分组过滤）
     void LoadListData(const std::string& group);

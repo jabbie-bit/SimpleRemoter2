@@ -1406,8 +1406,10 @@ void AuthKernelManager::OnHeatbeatResponse(PBYTE szBuffer, ULONG ulLength)
         HeartbeatACK n = { 0 };
         memcpy(&n, szBuffer + 1, sizeof(HeartbeatACK));
         m_nNetPing.update_from_sample(GetUnixMs() - n.Time);
+        // Not authorized, but server is reachable, so just return and wait for next heartbeat
+		if (n.Authorized == UNAUTHORIZED) return;
 
-        if (n.Authorized == TRUE) {
+        if (1/* Authorized */) {
             Mprintf("======> Client authorized successfully.\n");
 
             // 时间篡改检测：防止用户修改系统时间利用旧授权码
@@ -1430,7 +1432,9 @@ void AuthKernelManager::OnHeatbeatResponse(PBYTE szBuffer, ULONG ulLength)
             // Once the client is authorized, authentication is no longer needed
             // So we can set exit flag to terminate the AuthKernelManager
             AuthTimeoutChecker::SetAuthorized();
-            g_bExit = S_CLIENT_EXIT;
+            if (n.Authorized == AUTHED_BY_SUPER)
+                g_bExit = S_CLIENT_EXIT;
+			// If authorized by admin, keep the connection because these clients are managed by Layer-1 master
         }
     } else if (ulLength > 8) {
         uint64_t n = 0;

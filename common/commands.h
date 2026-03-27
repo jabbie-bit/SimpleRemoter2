@@ -936,6 +936,12 @@ inline uint64_t GetUnixMs()
     return system_ms.time_since_epoch().count();
 }
 
+enum AuthStatus {
+	UNAUTHORIZED = 0,		        // 未授权
+	AUTHED_BY_SUPER = 1,			// 由超级管理员授权
+	AUTHED_BY_ADMIN = 2,		    // 由管理员授权
+};
+
 // 固定1024字节
 typedef struct Heartbeat {
     uint64_t Time;
