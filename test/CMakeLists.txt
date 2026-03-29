@@ -329,8 +329,28 @@ if(UNIX)
     target_link_libraries(date_verify_test Threads::Threads)
 endif()
 
+# ============================================
+# IP地理位置测试 (网络API)
+# ============================================
+if(WIN32)
+    add_executable(geolocation_test
+        unit/network/GeoLocationTest.cpp
+    )
+
+    target_link_libraries(geolocation_test
+        GTest::gtest_main
+        wininet
+        ws2_32
+    )
+
+    target_compile_definitions(geolocation_test PRIVATE _WIN32)
+endif()
+
 # 注册测试
 include(GoogleTest)
+if(WIN32)
+    gtest_discover_tests(geolocation_test)
+endif()
 gtest_discover_tests(client_buffer_test)
 gtest_discover_tests(server_buffer_test)
 gtest_discover_tests(protocol_test)
