@@ -5610,6 +5610,17 @@ void CMy2015RemoteDlg::OnToolGenMaster()
                     "\n只有正确设置公网地址，才能在线延长由本程序所生成的主控程序的有效期。", "提示", MB_ICONINFORMATION);
     }
     std::string masterHash(GetPwdHash());
+    std::string upperHash(GetMasterHash());
+    bool isSuperAdmin = (masterHash == upperHash);
+    const Validation* curValidation = GetValidation();
+
+    // 非超级管理员需要检查生成深度
+    if (!isSuperAdmin && !curValidation->CanGenerate()) {
+        MessageBoxL(_TR("当前主控程序没有生成下级主控的权限（MaxDepth=0）。\n请联系上级管理员获取授权。"), 
+            _TR("权限不足"), MB_ICONWARNING);
+        return;
+    }
+
     if (m_superPass.empty()) {
         CInputDialog pass(this);
         pass.Init(_TR("主控生成"), _TR("当前主控程序的密码:"));
@@ -5621,6 +5632,24 @@ void CMy2015RemoteDlg::OnToolGenMaster()
             return;
         }
         m_superPass = pass.m_str.GetString();
+    }
+
+    // 计算下级主控的 MaxDepth
+    unsigned short newMaxDepth = 0;
+    if (isSuperAdmin) {
+        // 超级管理员：提示输入下级的 MaxDepth
+        CInputDialog depthDlg(this);
+        depthDlg.Init(_TR("生成深度"), _TR("可生成的最大层数:"));
+        depthDlg.m_str = "1";
+        if (depthDlg.DoModal() != IDOK)
+            return;
+        int inputDepth = atoi(depthDlg.m_str);
+        if (inputDepth < 0) inputDepth = 0;
+        if (inputDepth > 255) inputDepth = 255;  // 限制最大深度
+        newMaxDepth = (unsigned short)inputDepth;
+    } else {
+        // 非超级管理员：深度递减
+        newMaxDepth = curValidation->MaxDepth - 1;
     }
 
     CInputDialog dlg(this);
@@ -5670,7 +5699,7 @@ void CMy2015RemoteDlg::OnToolGenMaster()
     }
     int port = THIS_CFG.Get1Int("settings", "ghost", ';', 6543);
     std::string id = genHMAC(pwdHash, m_superPass);
-    Validation verify(atof(days.m_str), master.c_str(), port<=0 ? 6543 : port, id.c_str());
+    Validation verify(atof(days.m_str), master.c_str(), port<=0 ? 6543 : port, id.c_str(), newMaxDepth);
     if (!WritePwdHash(curEXE + iOffset, pwdHash, verify)) {
         MessageBoxL("写入哈希失败! 无法生成主控。", "错误", MB_ICONWARNING);
         SAFE_DELETE_ARRAY(curEXE);
@@ -5725,15 +5754,17 @@ void CMy2015RemoteDlg::OnToolGenMaster()
         }
         GenerateHashHeaderFile(headerPath, pwdHash, verify, masterHash);
 
+        CString depthInfo;
+        depthInfo.Format(_TR("\r\n生成深度: %d (可继续生成%d层下级)"), newMaxDepth, newMaxDepth);
         if (!upx.empty()) {
 #ifndef _DEBUG // DEBUG 模式用UPX压缩的程序可能无法正常运行
             run_upx_async(GetSafeHwnd(), upx, name.GetString(), true);
-            MessageBoxL(_TR("正在UPX压缩，请关注信息提示。") + "\r\n" + _TR("文件位于: ") + name, "提示", MB_ICONINFORMATION);
+            MessageBoxL(_TR("正在UPX压缩，请关注信息提示。") + "\r\n" + _TR("文件位于: ") + name + depthInfo, "提示", MB_ICONINFORMATION);
 #endif
         } else
-            MessageBoxL(_TR("生成成功! 文件位于:") + "\r\n" + name, "提示", MB_ICONINFORMATION);
+            MessageBoxL(_TR("生成成功! 文件位于:") + "\r\n" + name + depthInfo, "提示", MB_ICONINFORMATION);
     }
-	Mprintf("主控程序生成: PwdHash= %s HMAC= %s. UpperHash: %s.\n", pwdHash.c_str(), id.c_str(), masterHash.c_str());
+	Mprintf("主控程序生成: PwdHash= %s HMAC= %s MaxDepth= %d. UpperHash: %s.\n", pwdHash.c_str(), id.c_str(), newMaxDepth, masterHash.c_str());
     SAFE_DELETE_ARRAY(curEXE);
 }
 

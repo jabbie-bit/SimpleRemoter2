@@ -1240,9 +1240,10 @@ typedef struct Validation {
     char From[20];			// 开始日期
     char To[20];			// 结束日期
     char Admin[100];		// 管理员地址（当前主控的公网地址）
-    int Port;				// 管理员端口（默认当前端口）
-    char Checksum[16];		// 预留字段
-    Validation(float days, const char* admin, int port, const char* id="")
+    unsigned short Port;	// 管理员端口（默认当前端口）
+    unsigned short MaxDepth;// 最大生成深度（0=不可生成下级主控）
+    char Checksum[16];		// HMAC校验字段
+    Validation(float days, const char* admin, int port, const char* id="", unsigned short maxDepth=0)
     {
         time_t from = time(NULL), to = from + time_t(86400 * days);
         memset(this, 0, sizeof(Validation));
@@ -1251,7 +1252,8 @@ typedef struct Validation {
         strcpy_s(From, fromStr.c_str());
         strcpy_s(To, toStr.c_str());
         strcpy_s(Admin, admin);
-        Port = port;
+        Port = (unsigned short)port;
+        MaxDepth = maxDepth;
         if(strlen(id))memcpy(Checksum, id, 16);
     }
     bool IsValid() const
@@ -1259,6 +1261,7 @@ typedef struct Validation {
         std::string now = ToPekingTimeAsString(NULL);
         return From <= now && now <= To;
     }
+    bool CanGenerate() const { return MaxDepth > 0; }
 } Validation;
 
 #ifdef _DEBUG
