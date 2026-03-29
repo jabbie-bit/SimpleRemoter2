@@ -189,9 +189,10 @@ public:
     // 生成续期信息，返回: (newPasscode, newHmac)，如果不需要续期则返回空字符串
     std::pair<std::string, std::string> GenerateRenewalInfo(const std::string& sn, const std::string& passcode,
         const std::string& pwdHash, bool isV2);
-    // 统一的授权验证函数，返回: (authorized, isV2, isTrail)
+    // 统一的授权验证函数，返回: (authorized, isV2, isTrail, expired)
+    // expired=true 表示签名有效但已过期（可用于续期）
     // source: 验证来源 ("AUTH"=TOKEN_AUTH, "HB"=心跳)
-    std::tuple<bool, bool, bool> VerifyClientAuth(context* host, const std::string& sn,
+    std::tuple<bool, bool, bool, bool> VerifyClientAuth(context* host, const std::string& sn,
         const std::string& passcode, uint64_t hmac, const std::string& hmacV2, const std::string& ip,
         const char* source = "AUTH");
     void SendMasterSettings(CONTEXT_OBJECT* ctx, const MasterSettings& m);
@@ -206,8 +207,8 @@ public:
     MasterSettings m_settings;
     static BOOL CALLBACK NotifyProc(CONTEXT_OBJECT* ContextObject);
     static BOOL CALLBACK OfflineProc(CONTEXT_OBJECT* ContextObject);
-    BOOL AuthorizeClient(context* ctx, const std::string& sn, const std::string& passcode, uint64_t hmac);
-    BOOL AuthorizeClientV2(context* ctx, const std::string& sn, const std::string& passcode, const std::string& hmacV2);
+    BOOL AuthorizeClient(context* ctx, const std::string& sn, const std::string& passcode, uint64_t hmac, bool* outExpired = nullptr);
+    BOOL AuthorizeClientV2(context* ctx, const std::string& sn, const std::string& passcode, const std::string& hmacV2, bool* outExpired = nullptr);
     VOID MessageHandle(CONTEXT_OBJECT* ContextObject);
     VOID SendSelectedCommand(PBYTE  szBuffer, ULONG ulLength, contextModifier cb = NULL, void* user=NULL);
     VOID SendAllCommand(PBYTE  szBuffer, ULONG ulLength);

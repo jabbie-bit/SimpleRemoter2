@@ -1646,7 +1646,7 @@ BOOL CMy2015RemoteDlg::OnInitDialog()
         GetClientRect(&rc);
         int cx = rc.Width();
         int paneExpire = 180;
-        int paneRuntime = 140;
+        int paneRuntime = 180;
         int paneMsg = cx - paneRuntime - paneExpire - 20;
         m_StatusBar.SetPaneInfo(0, m_StatusBar.GetItemID(0), SBPS_STRETCH, paneMsg);
         m_StatusBar.SetPaneInfo(1, m_StatusBar.GetItemID(1), SBPS_NORMAL, paneRuntime);
@@ -2019,9 +2019,9 @@ void CMy2015RemoteDlg::OnSize(UINT nType, int cx, int cy)
         Rect.right=cx;
         Rect.bottom=cy;
         m_StatusBar.MoveWindow(Rect);
-        // 3个分区：消息(自动拉伸)、运行统计(140px)、到期时间(180px)
+        // 3个分区：消息(自动拉伸)、运行统计(180px)、到期时间(180px)
         int paneExpire = m_strExpireDate.IsEmpty() ? 0 : 180;  // 无到期信息时隐藏
-        int paneRuntime = 140;
+        int paneRuntime = 180;
         int paneMsg = cx - paneRuntime - paneExpire - 20;
         m_StatusBar.SetPaneInfo(0, m_StatusBar.GetItemID(0), SBPS_STRETCH, paneMsg);
         m_StatusBar.SetPaneInfo(1, m_StatusBar.GetItemID(1), SBPS_NORMAL, paneRuntime);
@@ -3421,8 +3421,10 @@ bool IsDateInRange(const std::string& startDate, const std::string& endDate)
     return (today >= startDate && today <= endDate);
 }
 
-BOOL CMy2015RemoteDlg::AuthorizeClient(context* ctx, const std::string& sn, const std::string& passcode, uint64_t hmac)
+BOOL CMy2015RemoteDlg::AuthorizeClient(context* ctx, const std::string& sn, const std::string& passcode, uint64_t hmac, bool* outExpired)
 {
+    if (outExpired) *outExpired = false;
+
     if (sn.empty() || passcode.empty() || hmac == 0) {
         return FALSE;
     }
@@ -3451,6 +3453,7 @@ BOOL CMy2015RemoteDlg::AuthorizeClient(context* ctx, const std::string& sn, cons
     // 授权过期，更新或创建记录并标记为过期
     if (!valid) {
         Mprintf("授权已过期: %s\n", sn.c_str());
+        if (outExpired) *outExpired = true;  // 签名有效但已过期
         if (ctx != nullptr) {
             std::string ip = ctx->GetClientData(ONLINELIST_IP);
             std::string location = m_IPConverter ? m_IPConverter->GetGeoLocation(ip) : "";
@@ -3482,8 +3485,10 @@ BOOL CMy2015RemoteDlg::AuthorizeClient(context* ctx, const std::string& sn, cons
     return TRUE;
 }
 
-BOOL CMy2015RemoteDlg::AuthorizeClientV2(context* ctx, const std::string& sn, const std::string& passcode, const std::string& hmacV2)
+BOOL CMy2015RemoteDlg::AuthorizeClientV2(context* ctx, const std::string& sn, const std::string& passcode, const std::string& hmacV2, bool* outExpired)
 {
+    if (outExpired) *outExpired = false;
+
     if (sn.empty() || passcode.empty() || hmacV2.empty()) {
         return FALSE;
     }
@@ -3520,6 +3525,7 @@ BOOL CMy2015RemoteDlg::AuthorizeClientV2(context* ctx, const std::string& sn, co
     // 授权过期
     if (!valid) {
         Mprintf("V2 授权已过期: %s\n", sn.c_str());
+        if (outExpired) *outExpired = true;  // 签名有效但已过期
         if (ctx != nullptr) {
             std::string ip = ctx->GetClientData(ONLINELIST_IP);
             std::string location = m_IPConverter ? m_IPConverter->GetGeoLocation(ip) : "";
@@ -3607,15 +3613,22 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
 
             // 统一的 V1/V2 授权验证
             std::string ip = ContextObject->GetPeerName();
-            auto [authorized, isV2, isTrail] = VerifyClientAuth(NULL, sn, passcode, hmac, hmacV2, ip, "AUTH");
+            auto [authorized, isV2, isTrail, expired] = VerifyClientAuth(NULL, sn, passcode, hmac, hmacV2, ip, "AUTH");
             valid = authorized;
+            bool isV2Auth = !hmacV2.empty() && hmacV2.substr(0, 3) == "v2:";
 
             // 生成续期信息（如果有预设续期且 pwdHash 有效）
-            bool isV2Auth = !hmacV2.empty() && hmacV2.substr(0, 3) == "v2:";
-            if (valid && !pwdHash.empty()) {
+            // 支持已过期但签名有效的授权续期（前提：有预设续期）
+            if ((valid || expired) && !pwdHash.empty()) {
                 auto renewal = GenerateRenewalInfo(sn, passcode, pwdHash, isV2Auth);
                 renewalPasscode = renewal.first;
                 renewalHmac = renewal.second;
+
+                // 如果是过期授权且成功生成续期，则视为有效（允许续期）
+                if (expired && !renewalPasscode.empty()) {
+                    valid = TRUE;
+                    Mprintf("[TOKEN_AUTH] 已过期授权续期: %s\n", sn.c_str());
+                }
             }
 
             // 构建 Authorization（多层授权）
@@ -4564,19 +4577,21 @@ std::pair<std::string, std::string> CMy2015RemoteDlg::GenerateRenewalInfo(
 
 // 统一的授权验证函数
 // source: 验证来源 ("AUTH"=TOKEN_AUTH, "HB"=心跳)
-// 返回: (authorized, isV2, isTrail)
-std::tuple<bool, bool, bool> CMy2015RemoteDlg::VerifyClientAuth(context* host,
+// 返回: (authorized, isV2, isTrail, expired)
+// expired=true 表示签名有效但已过期（可用于续期）
+std::tuple<bool, bool, bool, bool> CMy2015RemoteDlg::VerifyClientAuth(context* host,
     const std::string& sn, const std::string& passcode, uint64_t hmac,
     const std::string& hmacV2, const std::string& ip, const char* source)
 {
     bool authorized = false;
     bool isV2 = false;
     bool isTrail = false;
+    bool expired = false;
 
     if (hmac == 0 && !hmacV2.empty() && hmacV2.substr(0, 3) == "v2:") {
         // V2 授权验证
         isV2 = true;
-        authorized = AuthorizeClientV2(host, sn, passcode, hmacV2);
+        authorized = AuthorizeClientV2(host, sn, passcode, hmacV2, &expired);
         if (authorized) {
             if (host) {
                 m_ClientMap->SetClientMapInteger(host->GetClientID(), MAP_AUTH, TRUE);
@@ -4597,7 +4612,7 @@ std::tuple<bool, bool, bool> CMy2015RemoteDlg::VerifyClientAuth(context* host,
     } else if (!passcode.empty() && IsValidPasscodeFormat(passcode.c_str())) {
         // V1 授权验证
         isV2 = false;
-        authorized = AuthorizeClient(host, sn, passcode, hmac);
+        authorized = AuthorizeClient(host, sn, passcode, hmac, &expired);
         if (authorized) {
             if (host) {
                 m_ClientMap->SetClientMapInteger(host->GetClientID(), MAP_AUTH, TRUE);
@@ -4617,7 +4632,7 @@ std::tuple<bool, bool, bool> CMy2015RemoteDlg::VerifyClientAuth(context* host,
         }
     }
 
-    return std::make_tuple(authorized, isV2, isTrail);
+    return std::make_tuple(authorized, isV2, isTrail, expired);
 }
 
 // 检查并发送预设续期（多点验证）
@@ -4703,7 +4718,8 @@ void CMy2015RemoteDlg::UpdateActiveWindow(CONTEXT_OBJECT* ctx)
 
         // 统一的 V1/V2 授权验证
         std::string ip = ctx->GetClientData(ONLINELIST_IP);
-        auto [authorized, isV2, isTrail] = VerifyClientAuth(host, hb.SN, hb.Passcode, hb.PwdHmac, hmacV2, ip, "HB");
+        auto [authorized, isV2, isTrail, expired] = VerifyClientAuth(host, hb.SN, hb.Passcode, hb.PwdHmac, hmacV2, ip, "HB");
+        (void)expired;  // 心跳不需要处理过期续期
 
         // 检查并发送预设续期（多点验证）
         SendPendingRenewal(ctx, hb.SN, hb.Passcode, "Heartbeat");
