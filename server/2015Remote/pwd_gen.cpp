@@ -134,6 +134,30 @@ std::string getHardwareID()
     return combinedID;
 }
 
+// Enhanced hardware ID for VPS (includes UUID and MachineGuid)
+// Uses PowerShell directly (available on Win7+, won't be removed like wmic)
+std::string getHardwareID_V2()
+{
+    const char* psScript =
+        "(Get-WmiObject Win32_Processor).ProcessorId + '|' + "
+        "(Get-WmiObject Win32_BaseBoard).SerialNumber + '|' + "
+        "(Get-WmiObject Win32_DiskDrive | Select -First 1).SerialNumber + '|' + "
+        "(Get-WmiObject Win32_ComputerSystemProduct).UUID + '|' + "
+        "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Cryptography').MachineGuid";
+
+    std::string cmd = "powershell -NoProfile -Command \"";
+    cmd += psScript;
+    cmd += "\"";
+
+    std::string combinedID = execCommand(cmd.c_str());
+    if (combinedID.empty() || combinedID.find("ERROR") != std::string::npos) {
+        Mprintf("Get V2 hardware info FAILED!!!\n");
+        Sleep(1234);
+        TerminateProcess(GetCurrentProcess(), 0);
+    }
+    return combinedID;
+}
+
 // 使用 SHA-256 计算哈希
 std::string hashSHA256(const std::string& data)
 {

@@ -6,6 +6,9 @@
 
 std::string getHardwareID();
 
+// Enhanced hardware ID for VPS (includes UUID and MachineGuid)
+std::string getHardwareID_V2();
+
 std::string hashSHA256(const std::string& data);
 
 std::string genHMAC(const std::string& pwdHash, const std::string& superPass);

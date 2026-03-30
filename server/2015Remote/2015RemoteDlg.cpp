@@ -476,11 +476,18 @@ std::string GetParentDir()
 
 std::string CMy2015RemoteDlg::GetHardwareID(int v)
 {
-    int version = v == -1 ? THIS_CFG.GetInt("settings", "BindType", 0) : v;
-    switch (version) {
+    int bindType = v == -1 ? THIS_CFG.GetInt("settings", "BindType", 0) : v;
+    switch (bindType) {
     case 0: {
-        static auto hardwareID = getHardwareID();
-        return hardwareID;
+        // Hardware binding: check HWIDVersion for V1/V2
+        int hwVersion = THIS_CFG.GetInt("settings", "HWIDVersion", 0);
+        if (hwVersion == 2) {
+            static auto hardwareID = getHardwareID_V2();
+            return hardwareID;
+        } else {
+            static auto hardwareID = getHardwareID();
+            return hardwareID;
+        }
     }
     case 1: {
         std::string master = THIS_CFG.GetStr("settings", "master");
@@ -1384,7 +1391,16 @@ BOOL CMy2015RemoteDlg::OnInitDialog()
 
     UPDATE_SPLASH(15, "正在注册主控信息...");
     THIS_CFG.SetStr("settings", "MainWnd", std::to_string((uint64_t)GetSafeHwnd()));
-    THIS_CFG.SetStr("settings", "SN", getDeviceID(GetHardwareID()));
+
+    // SN generation with backward compatibility:
+    // - Existing users (have SN): keep original SN unchanged
+    // - New users: use V2 (includes UUID + MachineGuid for VPS uniqueness)
+    std::string existingSN = THIS_CFG.GetStr("settings", "SN", "");
+    if (existingSN.empty()) {
+        THIS_CFG.SetStr("settings", "SN", getDeviceID(getHardwareID_V2()));
+        THIS_CFG.SetInt("settings", "HWIDVersion", 2);
+    }
+
     THIS_CFG.SetStr("settings", "PwdHash", GetPwdHash());
     THIS_CFG.SetStr("settings", "MasterHash", GetMasterHash());
     THIS_CFG.SetStr("settings", "Version", VERSION_STR);

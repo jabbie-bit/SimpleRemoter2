@@ -97,7 +97,8 @@ SNMatchResult ValidateLicenseSN(const std::string& licenseSN) {
         return SNMatchResult::IPMismatch;
     } else {
         // Hardware binding: check if matches current device ID
-        std::string hardwareID = getHardwareID();
+        // Use GetHardwareID() to respect HWIDVersion (V1 or V2)
+        std::string hardwareID = CMy2015RemoteDlg::GetHardwareID(0);
         std::string hashedID = hashSHA256(hardwareID);
         std::string currentDeviceID = getFixedLengthID(hashedID);
         if (licenseSN == currentDeviceID) {
