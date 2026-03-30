@@ -6150,7 +6150,8 @@ int main() {
 void shellcode_process(ObfsBase *obfs, bool load = false, const char* suffix = ".c")
 {
     CFileDialog fileDlg(TRUE, NULL, NULL, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
-                        _T("DLL Files (*.dll)|*.dll|BIN Files (*.bin)|*.bin|All Files (*.*)|*.*||"), AfxGetMainWnd());
+        load ? _T("BIN Files (*.bin)|*.bin|All Files (*.*)|*.*||"):
+        _T("DLL Files (*.dll)|*.dll|All Files (*.*)|*.*||"), AfxGetMainWnd());
     int ret = 0;
     try {
         ret = fileDlg.DoModal();

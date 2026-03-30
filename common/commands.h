@@ -641,6 +641,8 @@ enum ClientCompressType {
     CLIENT_COMPRESS_SC_AES = 2,
     CLIENT_PE_TO_SEHLLCODE = 3,
     CLIENT_COMPRESS_SC_AES_OLD = 4,
+    CLIENT_SHELLCODE_BINARY = 5,
+    CLIENT_COMP_SC_AES_OLD_UPX = 6,
 };
 
 inline std::vector<std::string> StringToVector(const std::string& str, char ch, int reserved = 1);

