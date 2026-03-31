@@ -74,6 +74,7 @@
     <ClCompile Include="CLicenseDlg.cpp" />
     <ClCompile Include="NotifyManager.cpp" />
     <ClCompile Include="NotifySettingsDlg.cpp" />
+    <ClCompile Include="FrpsForSubDlg.cpp" />
     <ClCompile Include="NetworkDlg.cpp" />
     <ClCompile Include="IPHistoryDlg.cpp" />
   </ItemGroup>
@@ -166,6 +167,7 @@
     <ClInclude Include="NotifyConfig.h" />
     <ClInclude Include="NotifyManager.h" />
     <ClInclude Include="NotifySettingsDlg.h" />
+    <ClInclude Include="FrpsForSubDlg.h" />
     <ClInclude Include="TerminalModuleLoader.h" />
     <ClInclude Include="..\..\common\SafeString.h" />
     <ClInclude Include="NetworkDlg.h" />

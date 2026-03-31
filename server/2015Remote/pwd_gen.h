@@ -97,3 +97,50 @@ std::string signAuthorizationV2(const std::string& license, const std::string& s
 // deviceID: 第一层的设备ID（如 "XXXX-XXXX-XXXX-XXXX"）
 // 返回: SHA256(deviceID).substr(0, 8)
 std::string computeSnHashPrefix(const std::string& deviceID);
+
+// ============================================================================
+// FRP 自动代理配置生成
+// ============================================================================
+
+// FRP 认证模式
+enum FrpAuthModeGen {
+    FRP_AUTH_MODE_TOKEN = 0,           // 官方 FRP: 直接使用 token (编码为 ENC:xxx)
+    FRP_AUTH_MODE_PRIVILEGE_KEY = 1    // 自定义 FRP: 使用 privilegeKey = MD5(token + timestamp)
+};
+
+// XOR 编码 Token（用于官方 FRP 模式）
+// 格式: "ENC:" + Base64(XOR(token, key))
+// 下级检测到 ENC: 前缀后解码使用
+std::string EncodeFrpToken(const std::string& token);
+
+// XOR 解码 Token
+// 输入: "ENC:xxx" -> 输出: 原始 token
+// 如果不是 ENC: 前缀，返回空字符串
+std::string DecodeFrpToken(const std::string& encoded);
+
+// 检测 privilegeKey 是否为编码的 token
+// 返回: true 如果以 "ENC:" 开头
+bool IsFrpTokenEncoded(const std::string& privilegeKey);
+
+// 日期字符串转 Unix 时间戳（当天 23:59:59 UTC）
+// 输入: "20260323" -> 输出: 1774329599
+time_t FrpDateToTimestamp(const std::string& dateStr);
+
+// 生成 FRP 配置字符串
+// serverAddr: FRPS 服务器地址
+// serverPort: FRPS 服务器端口
+// remotePort: 分配给下级的远程端口
+// frpToken: FRPS 认证 Token
+// expireDate: 有效日期（YYYYMMDD 格式），最大 "20371231"（32位timestamp限制）
+// authMode: 认证模式 (FRP_AUTH_MODE_TOKEN 或 FRP_AUTH_MODE_PRIVILEGE_KEY)
+// 返回: "serverAddr:serverPort-remotePort-expireDate-privilegeKey"
+//       官方模式: privilegeKey = "ENC:xxx" (编码的 token)
+//       自定义模式: privilegeKey = MD5(token + timestamp)
+std::string GenerateFrpConfig(
+    const std::string& serverAddr,
+    int serverPort,
+    int remotePort,
+    const std::string& frpToken,
+    const std::string& expireDate,
+    int authMode = FRP_AUTH_MODE_PRIVILEGE_KEY
+);

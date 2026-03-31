@@ -69,9 +69,12 @@ public:
 std::string GetLicensesPath();
 bool SaveLicenseInfo(const std::string& deviceID, const std::string& passcode,
                      const std::string& hmac, const std::string& remark = "",
-                     const std::string& authorization = "");
+                     const std::string& authorization = "",
+                     const std::string& frpConfig = "");
 bool LoadLicenseInfo(const std::string& deviceID, std::string& passcode,
                      std::string& hmac, std::string& remark);
+// 加载授权的 FRP 配置
+std::string LoadLicenseFrpConfig(const std::string& deviceID);
 // 更新授权活跃信息（IP、位置、最后活跃时间）
 // 如果授权不存在则自动创建记录
 // machineName: 机器名，用于区分同一公网IP下的不同机器
@@ -132,4 +135,16 @@ public:
     afx_msg void OnCbnSelchangeComboVersion();  // 版本切换事件
     afx_msg void OnBnClickedButtonBrowseKey();  // 浏览私钥文件事件
     afx_msg void OnBnClickedButtonGenKeypair(); // 生成密钥对事件
+
+    // FRP 代理相关
+    CButton m_CheckFrpProxy;    // FRP 代理复选框
+    CEdit m_EditFrpRemotePort;  // FRP 远程端口
+    CButton m_BtnFrpAutoPort;   // 自动分配端口按钮
+    CStatic m_StaticFrpInfo;    // FRPS 信息显示
+    int m_nFrpRemotePort;       // FRP 远程端口值
+    std::string m_sFrpConfig;   // 生成的 FRP 配置字符串
+
+    afx_msg void OnBnClickedCheckFrpProxy();    // FRP 复选框点击
+    afx_msg void OnBnClickedBtnFrpAutoPort();   // 自动分配端口按钮
+    void UpdateFrpControlStates();              // 更新 FRP 控件状态
 };

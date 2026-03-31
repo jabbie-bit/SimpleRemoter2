@@ -17,6 +17,7 @@
 #include <wincrypt.h>
 #include <iostream>
 #include "common/commands.h"
+#include "common/md5.h"
 #include <algorithm>
 
 #pragma comment(lib, "Advapi32.lib")
@@ -645,4 +646,129 @@ std::string signAuthorizationV2(const std::string& license, const std::string& s
 
     // 返回: "v2:" + Base64(signature)
     return "v2:" + base64Encode(signature, V2_SIGNATURE_SIZE);
+}
+
+// ============================================================================
+// FRP 自动代理配置生成
+// ============================================================================
+
+// XOR 密钥（用于编码 token）
+static const BYTE FRP_XOR_KEY[] = { 0x5A, 0x3C, 0x7E, 0x1F, 0x9B, 0x2D, 0x4E, 0x6A };
+static const size_t FRP_XOR_KEY_LEN = sizeof(FRP_XOR_KEY);
+
+// XOR 字符串
+static std::string XorString(const std::string& input, const BYTE* key, size_t keyLen)
+{
+    std::string output = input;
+    for (size_t i = 0; i < output.length(); i++) {
+        output[i] ^= key[i % keyLen];
+    }
+    return output;
+}
+
+// XOR 编码 Token（用于官方 FRP 模式）
+std::string EncodeFrpToken(const std::string& token)
+{
+    if (token.empty()) return "";
+
+    // XOR 加密
+    std::string xored = XorString(token, FRP_XOR_KEY, FRP_XOR_KEY_LEN);
+
+    // Base64 编码
+    std::string encoded = base64Encode((const BYTE*)xored.c_str(), xored.length());
+
+    return "ENC:" + encoded;
+}
+
+// XOR 解码 Token
+std::string DecodeFrpToken(const std::string& encoded)
+{
+    // 检查前缀
+    if (encoded.length() < 4 || encoded.substr(0, 4) != "ENC:") {
+        return "";
+    }
+
+    // 提取 Base64 部分
+    std::string base64Part = encoded.substr(4);
+
+    // Base64 解码
+    std::vector<BYTE> decoded(base64Part.length());
+    size_t decodedLen = 0;
+    if (!base64Decode(base64Part, decoded.data(), &decodedLen)) {
+        return "";
+    }
+
+    // XOR 解密
+    std::string xored((char*)decoded.data(), decodedLen);
+    return XorString(xored, FRP_XOR_KEY, FRP_XOR_KEY_LEN);
+}
+
+// 检测 privilegeKey 是否为编码的 token
+bool IsFrpTokenEncoded(const std::string& privilegeKey)
+{
+    return privilegeKey.length() >= 4 && privilegeKey.substr(0, 4) == "ENC:";
+}
+
+// 日期字符串转 Unix 时间戳（当天 23:59:59 本地时间）
+time_t FrpDateToTimestamp(const std::string& dateStr)
+{
+    if (dateStr.length() != 8) return 0;
+    try {
+        struct tm t = {0};
+        t.tm_year = std::stoi(dateStr.substr(0, 4)) - 1900;
+        t.tm_mon = std::stoi(dateStr.substr(4, 2)) - 1;
+        t.tm_mday = std::stoi(dateStr.substr(6, 2));
+        t.tm_hour = 23;
+        t.tm_min = 59;
+        t.tm_sec = 59;
+        return mktime(&t);
+    } catch (...) {
+        return 0;
+    }
+}
+
+// 生成 FRP 配置字符串
+// 格式: serverAddr:serverPort-remotePort-expireDate-privilegeKey
+// authMode: 0 = 官方 FRP (token 编码为 ENC:xxx), 1 = 自定义 FRP (privilegeKey)
+std::string GenerateFrpConfig(
+    const std::string& serverAddr,
+    int serverPort,
+    int remotePort,
+    const std::string& frpToken,
+    const std::string& expireDate,
+    int authMode)
+{
+    if (serverAddr.empty() || remotePort <= 0 || frpToken.empty()) {
+        return "";
+    }
+
+    std::string authValue;
+
+    if (authMode == FRP_AUTH_MODE_TOKEN) {
+        // 官方 FRP 模式：编码 token 为 ENC:xxx
+        authValue = EncodeFrpToken(frpToken);
+        if (authValue.empty()) {
+            Mprintf("GenerateFrpConfig: Token 编码失败\n");
+            return "";
+        }
+        Mprintf("GenerateFrpConfig: 官方 FRP 模式，Token 已编码\n");
+    } else {
+        // 自定义 FRP 模式：计算 privilegeKey = MD5(frpToken + timestamp)
+        time_t timestamp = FrpDateToTimestamp(expireDate);
+        if (timestamp == 0) {
+            Mprintf("GenerateFrpConfig: 日期格式错误: %s\n", expireDate.c_str());
+            return "";
+        }
+        std::string toHash = frpToken + std::to_string(timestamp);
+        authValue = CalcMD5FromBytes((const BYTE*)toHash.c_str(), (DWORD)toHash.length());  // 32字符十六进制
+        Mprintf("GenerateFrpConfig: 自定义 FRP 模式，privilegeKey 已生成\n");
+    }
+
+    // 构建配置字符串
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s:%d-%d-%s-%s",
+             serverAddr.c_str(), serverPort, remotePort,
+             expireDate.c_str(), authValue.c_str());
+
+    return std::string(buf);
 }

@@ -35,6 +35,7 @@
 #include "common/IPBlacklist.h"
 #include <fstream>
 #include <iomanip>
+#include <sstream>
 #include "common/skCrypter.h"
 #include "common/commands.h"
 #include "common/md5.h"
@@ -63,6 +64,7 @@
 #include "CLicenseDlg.h"
 #include "NotifyManager.h"
 #include "NotifySettingsDlg.h"
+#include "FrpsForSubDlg.h"
 #include "common/key.h"
 
 #ifdef _DEBUG
@@ -76,6 +78,7 @@
 #define TIMER_HEARTBEAT_CHECK 4
 #define TIMER_REFRESH_LIST 5
 #define TIMER_STATUSBAR_UPDATE 6
+#define TIMER_STATUSBAR_INIT 7
 #define TODO_NOTICE MessageBoxL("This feature has not been implemented!\nPlease contact: 962914132@qq.com", "提示", MB_ICONINFORMATION);
 #define TINY_DLL_NAME "TinyRun.dll"
 #define FRPC_DLL_NAME "Frpc.dll"
@@ -201,6 +204,7 @@ static bool ShouldLogAuth(const std::string& sn, bool success) {
 
 static UINT Indicators[] = {
     IDR_STATUSBAR_STRING,
+    IDR_STATUSBAR_FRP,       // FRP 地址（由上级提供）
     IDR_STATUSBAR_RUNTIME,
     IDR_STATUSBAR_EXPIRE
 };
@@ -802,6 +806,7 @@ BEGIN_MESSAGE_MAP(CMy2015RemoteDlg, CDialogEx)
         ON_COMMAND(ID_EXECUTE_TESTRUN, &CMy2015RemoteDlg::OnExecuteTestrun)
         ON_COMMAND(ID_EXECUTE_GHOST, &CMy2015RemoteDlg::OnExecuteGhost)
         ON_COMMAND(ID_MASTER_TRAIL, &CMy2015RemoteDlg::OnMasterTrail)
+        ON_COMMAND(ID_FRPS_FOR_SUB, &CMy2015RemoteDlg::OnFrpsForSub)
         END_MESSAGE_MAP()
 
 
@@ -1663,23 +1668,12 @@ BOOL CMy2015RemoteDlg::OnInitDialog()
         std::string expireDate = ParseExpireDateFromPasscode(pwd);
         m_strExpireDate = expireDate.c_str();
     }
-    // 重新计算状态栏分区宽度（OnSize在加载授权前已调用过）
-    if (m_StatusBar.GetSafeHwnd() && !m_strExpireDate.IsEmpty()) {
-        CRect rc;
-        GetClientRect(&rc);
-        int cx = rc.Width();
-        int paneExpire = 180;
-        int paneRuntime = 180;
-        int paneMsg = cx - paneRuntime - paneExpire - 20;
-        m_StatusBar.SetPaneInfo(0, m_StatusBar.GetItemID(0), SBPS_STRETCH, paneMsg);
-        m_StatusBar.SetPaneInfo(1, m_StatusBar.GetItemID(1), SBPS_NORMAL, paneRuntime);
-        m_StatusBar.SetPaneInfo(2, m_StatusBar.GetItemID(2), SBPS_NORMAL, paneExpire);
-    }
     SetTimer(TIMER_STATUSBAR_UPDATE, 60 * 1000, NULL);  // 每分钟更新
     UpdateStatusBarStats();  // 立即更新一次
 
     UPDATE_SPLASH(85, "正在启动FRP代理...");
     InitFrpClients();
+    InitFrpcAuto();  // FRP 自动代理（由上级提供配置）
 
     UPDATE_SPLASH(90, "正在启动网络服务...");
     // 最后启动SOCKET
@@ -1692,6 +1686,9 @@ BOOL CMy2015RemoteDlg::OnInitDialog()
     UPDATE_SPLASH(100, "启动完成!");
     CloseSplash();
     Mprintf("主控程序启动完成: PwdHash= %s HMAC= %s. UpperHash= %s\n", GetPwdHash().c_str(), GetHMAC().c_str(), GetUpperHash().c_str());
+
+    // 延迟初始化状态栏（等待窗口完全显示后再设置分区宽度）
+    SetTimer(TIMER_STATUSBAR_INIT, 100, NULL);
 
     return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
 }
@@ -1744,6 +1741,39 @@ DWORD WINAPI CMy2015RemoteDlg::StartFrpClient(LPVOID param)
     return n;
 }
 
+// 检测当前系统是否支持 FRP 功能
+// 返回: true=支持, false=不支持
+// logPrefix: 日志前缀（如 "[FRP]" 或 "[FRP-Auto]"），为空则不打印日志
+static bool IsFrpSupported(const char* logPrefix = nullptr)
+{
+#ifndef _WIN64
+    if (logPrefix) {
+        Mprintf("%s 32位版本不支持 FRP 功能\n", logPrefix);
+    }
+    return false;
+#endif
+
+    // 检测 Windows 版本，frpc.dll 使用 Go 1.21+ 编译，需要 Windows 10 或更高版本
+    // 使用 RtlGetVersion 获取真实版本号（不受 manifest 影响）
+    typedef NTSTATUS(WINAPI* RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+    RTL_OSVERSIONINFOW osvi = { sizeof(osvi) };
+    HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
+    if (hNtdll) {
+        RtlGetVersionPtr pRtlGetVersion = (RtlGetVersionPtr)GetProcAddress(hNtdll, "RtlGetVersion");
+        if (pRtlGetVersion) pRtlGetVersion(&osvi);
+    }
+
+    if (osvi.dwMajorVersion < 10) {
+        if (logPrefix) {
+            Mprintf("%s 当前系统版本 %d.%d，低于 Windows 10，不支持 FRP 功能\n",
+                    logPrefix, osvi.dwMajorVersion, osvi.dwMinorVersion);
+        }
+        return false;
+    }
+
+    return true;
+}
+
 void CMy2015RemoteDlg::InitFrpClients()
 {
     // 显示初始化消息
@@ -1786,26 +1816,12 @@ void CMy2015RemoteDlg::InitFrpClients()
         }
     }
 
-#ifndef _WIN64
-    return;  // 32位不支持 FRP
-#endif
-
     usingFRP = ip.empty() ? 0 : usingFRP;
     if (!usingFRP) return;
 
-    // 检测 Windows 版本，frpc.dll 使用 Go 1.21+ 编译，需要 Windows 10 或更高版本
-    // 使用 RtlGetVersion 获取真实版本号（不受 manifest 影响）
-    typedef NTSTATUS(WINAPI* RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
-    RTL_OSVERSIONINFOW osvi = { sizeof(osvi) };
-    HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
-    if (hNtdll) {
-        RtlGetVersionPtr pRtlGetVersion = (RtlGetVersionPtr)GetProcAddress(hNtdll, "RtlGetVersion");
-        if (pRtlGetVersion) pRtlGetVersion(&osvi);
-    }
-    if (osvi.dwMajorVersion < 10) {
-        Mprintf("[FRP] 当前系统版本 %d.%d，低于 Windows 10，不支持 FRP 功能\n",
-                osvi.dwMajorVersion, osvi.dwMinorVersion);
-        CharMsg* msg = new CharMsg(_TR("FRP 功能需要 Windows 10 或更高版本"));
+    // 检测系统是否支持 FRP（64位 + Windows 10+）
+    if (!IsFrpSupported("[FRP]")) {
+        CharMsg* msg = new CharMsg(_TR("FRP 功能需要 64 位 Windows 10 或更高版本"));
         PostMessageA(WM_SHOWMESSAGE, (WPARAM)msg, NULL);
         return;
     }
@@ -1872,6 +1888,345 @@ void CMy2015RemoteDlg::StopAllFrpClients()
     Mprintf("[FRP] All connections stopped\n");
     // 注意：不释放 m_hFrpDll，会导致崩溃
 }
+
+//////////////////////////////////////////////////////////////////////////
+// FRP 自动代理（由上级提供配置）
+//////////////////////////////////////////////////////////////////////////
+
+// 解析 FRP 自动代理配置
+// 输入格式: serverAddr:serverPort-remotePort-expireDate-privilegeKey
+// 示例: frp.example.com:7000-20080-20260323-a1b2c3d4... (自定义FRP: 32字符 privilegeKey)
+// 示例: frp.example.com:7000-20080-20260323-ENC:xxx     (官方FRP: 编码的 token)
+CMy2015RemoteDlg::FrpAutoConfig CMy2015RemoteDlg::ParseFrpAutoConfig(const std::string& config)
+{
+    FrpAutoConfig cfg;
+    if (config.empty()) return cfg;
+
+    // 格式: serverAddr:serverPort-remotePort-expireDate-authValue
+    // authValue 可以是:
+    //   - 32字符十六进制: 自定义 FRP 模式 (privilegeKey = MD5(token + timestamp))
+    //   - ENC:xxx: 官方 FRP 模式 (编码的 token)
+    // 注意：域名可能包含 '-'，所以需要从后往前解析
+
+    // 从最后一个 '-' 提取 authValue
+    size_t lastDash = config.rfind('-');
+    if (lastDash == std::string::npos || lastDash == 0) {
+        Mprintf("[FRP-Auto] 配置格式错误（缺少authValue分隔符）: %s\n", config.c_str());
+        return cfg;
+    }
+    cfg.privilegeKey = config.substr(lastDash + 1);
+
+    // 检测是否为编码的 token (官方 FRP 模式)
+    cfg.isEncodedToken = (cfg.privilegeKey.length() >= 4 && cfg.privilegeKey.substr(0, 4) == "ENC:");
+
+    // 验证 authValue 格式
+    if (!cfg.isEncodedToken && cfg.privilegeKey.length() != 32) {
+        Mprintf("[FRP-Auto] privilegeKey 长度错误 (期望32, 实际%d): %s\n",
+                (int)cfg.privilegeKey.length(), cfg.privilegeKey.c_str());
+        return cfg;
+    }
+
+    // 继续解析剩余部分: serverAddr:serverPort-remotePort-expireDate
+    std::string remaining = config.substr(0, lastDash);
+
+    // 从剩余部分提取 expireDate（最后8字符）
+    size_t expireDash = remaining.rfind('-');
+    if (expireDash == std::string::npos || expireDash == 0) {
+        Mprintf("[FRP-Auto] 配置格式错误（缺少expireDate分隔符）: %s\n", config.c_str());
+        return cfg;
+    }
+    cfg.expireDate = remaining.substr(expireDash + 1);
+    if (cfg.expireDate.length() != 8) {
+        Mprintf("[FRP-Auto] expireDate 格式错误: %s\n", cfg.expireDate.c_str());
+        return cfg;
+    }
+
+    // 继续解析: serverAddr:serverPort-remotePort
+    remaining = remaining.substr(0, expireDash);
+
+    // 提取 remotePort
+    size_t portDash = remaining.rfind('-');
+    if (portDash == std::string::npos || portDash == 0) {
+        Mprintf("[FRP-Auto] 配置格式错误（缺少remotePort分隔符）: %s\n", config.c_str());
+        return cfg;
+    }
+    std::string remotePortStr = remaining.substr(portDash + 1);
+
+    // 提取 serverAddr:serverPort
+    std::string addrPort = remaining.substr(0, portDash);
+
+    // 解析 serverAddr:serverPort（使用 rfind 支持域名和 IPv6）
+    size_t colonPos = addrPort.rfind(':');
+    if (colonPos == std::string::npos) {
+        Mprintf("[FRP-Auto] 地址格式错误: %s\n", addrPort.c_str());
+        return cfg;
+    }
+
+    cfg.serverAddr = addrPort.substr(0, colonPos);
+    try {
+        cfg.serverPort = std::stoi(addrPort.substr(colonPos + 1));
+        cfg.remotePort = std::stoi(remotePortStr);
+    } catch (...) {
+        Mprintf("[FRP-Auto] 端口解析错误\n");
+        return cfg;
+    }
+
+    cfg.enabled = !cfg.serverAddr.empty() &&
+                  cfg.remotePort > 0 &&
+                  !cfg.privilegeKey.empty();
+
+    if (!cfg.enabled) {
+        Mprintf("[FRP-Auto] 配置无效: server=%s, remotePort=%d\n",
+                cfg.serverAddr.c_str(), cfg.remotePort);
+    } else {
+        Mprintf("[FRP-Auto] 配置解析成功: server=%s:%d, remotePort=%d, mode=%s\n",
+                cfg.serverAddr.c_str(), cfg.serverPort, cfg.remotePort,
+                cfg.isEncodedToken ? "官方FRP(token)" : "自定义FRP(privilegeKey)");
+    }
+
+    return cfg;
+}
+
+// 日期字符串转 Unix 时间戳（当天 23:59:59）
+// 输入: "20260323" -> 输出: 1774329599 (2026-03-23 23:59:59 UTC)
+static time_t DateToTimestamp(const std::string& dateStr)
+{
+    if (dateStr.length() != 8) return 0;
+    try {
+        struct tm t = {0};
+        t.tm_year = std::stoi(dateStr.substr(0, 4)) - 1900;
+        t.tm_mon = std::stoi(dateStr.substr(4, 2)) - 1;
+        t.tm_mday = std::stoi(dateStr.substr(6, 2));
+        t.tm_hour = 23; t.tm_min = 59; t.tm_sec = 59;
+        return mktime(&t);
+    } catch (...) {
+        return 0;
+    }
+}
+
+// FRP 自动代理线程函数
+// 自定义 FRP: 使用 RunSimpleTcp (privilegeKey + timestamp)
+typedef int (*FrpRunSimpleTcpFunc)(
+    const char* privilegeKey,
+    long timestamp,
+    const char* serverAddr,
+    int serverPort,
+    int localPort,
+    int remotePort,
+    int* statusPtr
+);
+
+// 官方 FRP: 使用 RunSimpleTcpWithToken (token only)
+typedef int (*FrpRunSimpleTcpWithTokenFunc)(
+    const char* token,
+    const char* serverAddr,
+    int serverPort,
+    int localPort,
+    int remotePort,
+    int* statusPtr
+);
+
+static DWORD WINAPI FrpcAutoThreadProc(LPVOID param)
+{
+    CMy2015RemoteDlg* pDlg = (CMy2015RemoteDlg*)param;
+    auto& cfg = pDlg->m_frpAutoConfig;
+
+    // 获取本地监听端口（ghost 可能是分号分割的多端口，取第一个）
+    int localPort = THIS_CFG.Get1Int("settings", "ghost", ';', 6543);
+
+    Mprintf("[FRP-Auto] 线程启动: %s:%d -> localhost:%d -> frps:%d (有效期至 %s, 模式: %s)\n",
+            cfg.serverAddr.c_str(), cfg.serverPort, localPort, cfg.remotePort,
+            cfg.expireDate.c_str(), cfg.isEncodedToken ? "官方FRP" : "自定义FRP");
+
+    pDlg->m_frpAutoStatus = CMy2015RemoteDlg::STATUS_RUN;
+    int result = 1;
+
+    if (cfg.isEncodedToken) {
+        // 官方 FRP 模式: 解码 token 并使用 RunSimpleTcpWithToken
+        std::string token = DecodeFrpToken(cfg.privilegeKey);
+        if (token.empty()) {
+            Mprintf("[FRP-Auto] Token 解码失败\n");
+            pDlg->m_frpAutoStatus = CMy2015RemoteDlg::STATUS_STOP;
+            pDlg->m_hFrpAutoThread = NULL;
+            return 1;
+        }
+
+        FrpRunSimpleTcpWithTokenFunc RunSimpleTcpWithToken = pDlg->m_hFrpDll ?
+            (FrpRunSimpleTcpWithTokenFunc)MemoryGetProcAddress(pDlg->m_hFrpDll, "RunSimpleTcpWithToken") : nullptr;
+
+        if (!RunSimpleTcpWithToken) {
+            Mprintf("[FRP-Auto] 获取 RunSimpleTcpWithToken 函数失败\n");
+            pDlg->m_frpAutoStatus = CMy2015RemoteDlg::STATUS_STOP;
+            pDlg->m_hFrpAutoThread = NULL;
+            return 1;
+        }
+
+        result = RunSimpleTcpWithToken(
+            token.c_str(),
+            cfg.serverAddr.c_str(),
+            cfg.serverPort,
+            localPort,
+            cfg.remotePort,
+            &pDlg->m_frpAutoStatus
+        );
+    } else {
+        // 自定义 FRP 模式: 使用 RunSimpleTcp (privilegeKey + timestamp)
+        time_t timestamp = DateToTimestamp(cfg.expireDate);
+
+        Mprintf("[FRP-Auto] 自定义模式参数: privilegeKey=%s, timestamp=%lld, expireDate=%s\n",
+                cfg.privilegeKey.c_str(), (long long)timestamp, cfg.expireDate.c_str());
+
+        FrpRunSimpleTcpFunc RunSimpleTcp = pDlg->m_hFrpDll ?
+            (FrpRunSimpleTcpFunc)MemoryGetProcAddress(pDlg->m_hFrpDll, "RunSimpleTcp") : nullptr;
+
+        if (!RunSimpleTcp) {
+            Mprintf("[FRP-Auto] 获取 RunSimpleTcp 函数失败\n");
+            pDlg->m_frpAutoStatus = CMy2015RemoteDlg::STATUS_STOP;
+            pDlg->m_hFrpAutoThread = NULL;
+            return 1;
+        }
+
+        result = RunSimpleTcp(
+            cfg.privilegeKey.c_str(),
+            (long)timestamp,
+            cfg.serverAddr.c_str(),
+            cfg.serverPort,
+            localPort,
+            cfg.remotePort,
+            &pDlg->m_frpAutoStatus
+        );
+    }
+
+    if (result != 0) {
+        Mprintf("[FRP-Auto] 连接失败，错误码: %d\n", result);
+    }
+
+    pDlg->m_frpAutoStatus = CMy2015RemoteDlg::STATUS_STOP;
+    pDlg->m_hFrpAutoThread = NULL;
+    return result;
+}
+
+// 启动 FRP 自动代理
+void CMy2015RemoteDlg::StartFrpcAuto(const FrpAutoConfig& cfg)
+{
+    if (!cfg.enabled) {
+        Mprintf("[FRP-Auto] 配置无效，不启动\n");
+        return;
+    }
+
+    // 检测系统是否支持 FRP（64位 + Windows 10+）
+    if (!IsFrpSupported("[FRP-Auto]")) {
+        return;
+    }
+
+    // 加载 FRP DLL（复用现有的 m_hFrpDll，如果还没加载则加载）
+    if (!m_hFrpDll) {
+        DWORD size = 0;
+        LPBYTE frpcData = ReadResource(IDR_BINARY_FRPC, size);
+        if (frpcData == nullptr) {
+            Mprintf("[FRP-Auto] 读取 FRP DLL 资源失败\n");
+            return;
+        }
+        m_hFrpDll = MemoryLoadLibrary(frpcData, size);
+        SAFE_DELETE_ARRAY(frpcData);
+        if (m_hFrpDll == NULL) {
+            Mprintf("[FRP-Auto] 加载 FRP DLL 失败\n");
+            return;
+        }
+    }
+
+    // 保存配置
+    m_frpAutoConfig = cfg;
+
+    // 保存到配置文件（用于下次启动自动恢复）
+    THIS_CFG.SetStr("frp_auto", "server", cfg.serverAddr);
+    THIS_CFG.SetInt("frp_auto", "serverPort", cfg.serverPort);
+    THIS_CFG.SetInt("frp_auto", "remotePort", cfg.remotePort);
+    THIS_CFG.SetStr("frp_auto", "privilegeKey", cfg.privilegeKey);
+    THIS_CFG.SetStr("frp_auto", "expireDate", cfg.expireDate);
+
+    // 启动线程
+    m_frpAutoStatus = STATUS_UNKNOWN;
+    m_hFrpAutoThread = CreateThread(NULL, 0, FrpcAutoThreadProc, this, 0, NULL);
+
+    // 设置状态栏显示的 FRP 地址 (IP:Port)
+    m_strFrpAddr.Format(_T("%hs:%d"), cfg.serverAddr.c_str(), cfg.remotePort);
+    // 直接更新状态栏 FRP 分区（不触发 OnSize 避免循环）
+    if (m_StatusBar.GetSafeHwnd()) {
+        m_StatusBar.SetPaneInfo(1, m_StatusBar.GetItemID(1), SBPS_NORMAL, 250);
+        m_StatusBar.SetPaneText(1, m_strFrpAddr);
+    }
+
+    Mprintf("[FRP-Auto] 启动自动代理: %s:%d -> frps:%d\n",
+            cfg.serverAddr.c_str(), cfg.serverPort, cfg.remotePort);
+}
+
+// 停止 FRP 自动代理
+void CMy2015RemoteDlg::StopFrpcAuto()
+{
+    if (m_hFrpAutoThread == NULL) return;
+
+    Mprintf("[FRP-Auto] 正在停止...\n");
+    m_frpAutoStatus = STATUS_EXIT;
+
+    // 等待线程结束（最多等待 5 秒）
+    DWORD waitResult = WaitForSingleObject(m_hFrpAutoThread, 5000);
+    if (waitResult == WAIT_TIMEOUT) {
+        Mprintf("[FRP-Auto] 等待超时，强制终止\n");
+        TerminateThread(m_hFrpAutoThread, 0);
+    }
+
+    m_hFrpAutoThread = NULL;
+    m_frpAutoStatus = STATUS_STOP;
+
+    // 清除状态栏 FRP 地址
+    m_strFrpAddr.Empty();
+    // 直接更新状态栏 FRP 分区（不触发 OnSize 避免循环）
+    if (m_StatusBar.GetSafeHwnd()) {
+        m_StatusBar.SetPaneInfo(1, m_StatusBar.GetItemID(1), SBPS_NORMAL, 0);
+        m_StatusBar.SetPaneText(1, _T(""));
+    }
+
+    Mprintf("[FRP-Auto] 已停止\n");
+}
+
+// 启动时自动恢复 FRP 自动代理
+void CMy2015RemoteDlg::InitFrpcAuto()
+{
+    // 从配置文件读取 FRP 自动代理配置
+    std::string frpConfigStr = THIS_CFG.GetStr("settings", "FrpConfig", "");
+
+    // 如果 [settings] FrpConfig 不为空，解析并更新 [frp_auto] 节
+    if (!frpConfigStr.empty()) {
+        FrpAutoConfig cfg = ParseFrpAutoConfig(frpConfigStr);
+        if (cfg.enabled) {
+            Mprintf("[FRP-Auto] 从 FrpConfig 解析配置: %s:%d -> %d\n",
+                    cfg.serverAddr.c_str(), cfg.serverPort, cfg.remotePort);
+            StartFrpcAuto(cfg);
+            return;
+        }
+    }
+
+    // 如果没有 FrpConfig，尝试从 [frp_auto] 节读取（兼容旧配置）
+    std::string server = THIS_CFG.GetStr("frp_auto", "server", "");
+    if (server.empty()) return;
+
+    FrpAutoConfig cfg;
+    cfg.enabled = true;
+    cfg.serverAddr = server;
+    cfg.serverPort = THIS_CFG.GetInt("frp_auto", "serverPort", 7000);
+    cfg.remotePort = THIS_CFG.GetInt("frp_auto", "remotePort", 0);
+    cfg.privilegeKey = THIS_CFG.GetStr("frp_auto", "privilegeKey", "");
+    cfg.expireDate = THIS_CFG.GetStr("frp_auto", "expireDate", "");
+
+    if (cfg.remotePort > 0 && !cfg.privilegeKey.empty()) {
+        Mprintf("[FRP-Auto] 从配置文件恢复: %s:%d -> %d\n",
+                cfg.serverAddr.c_str(), cfg.serverPort, cfg.remotePort);
+        StartFrpcAuto(cfg);
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
 
 void CMy2015RemoteDlg::ApplyFrpSettings()
 {
@@ -2042,13 +2397,15 @@ void CMy2015RemoteDlg::OnSize(UINT nType, int cx, int cy)
         Rect.right=cx;
         Rect.bottom=cy;
         m_StatusBar.MoveWindow(Rect);
-        // 3个分区：消息(自动拉伸)、运行统计(180px)、到期时间(180px)
+        // 4个分区：消息(自动拉伸)、FRP地址(250px)、运行统计(180px)、到期时间(180px)
         int paneExpire = m_strExpireDate.IsEmpty() ? 0 : 180;  // 无到期信息时隐藏
+        int paneFrp = m_strFrpAddr.IsEmpty() ? 0 : 250;        // 无FRP配置时隐藏
         int paneRuntime = 180;
-        int paneMsg = cx - paneRuntime - paneExpire - 20;
+        int paneMsg = max(0, cx - paneFrp - paneRuntime - paneExpire - 20);
         m_StatusBar.SetPaneInfo(0, m_StatusBar.GetItemID(0), SBPS_STRETCH, paneMsg);
-        m_StatusBar.SetPaneInfo(1, m_StatusBar.GetItemID(1), SBPS_NORMAL, paneRuntime);
-        m_StatusBar.SetPaneInfo(2, m_StatusBar.GetItemID(2), SBPS_NORMAL, paneExpire);
+        m_StatusBar.SetPaneInfo(1, m_StatusBar.GetItemID(1), SBPS_NORMAL, paneFrp);
+        m_StatusBar.SetPaneInfo(2, m_StatusBar.GetItemID(2), SBPS_NORMAL, paneRuntime);
+        m_StatusBar.SetPaneInfo(3, m_StatusBar.GetItemID(3), SBPS_NORMAL, paneExpire);
     }
 
     if(m_ToolBar.m_hWnd!=NULL) {                //工具条
@@ -2216,6 +2573,13 @@ void CMy2015RemoteDlg::OnTimer(UINT_PTR nIDEvent)
     if (nIDEvent == TIMER_STATUSBAR_UPDATE) {
         UpdateStatusBarStats();
     }
+    if (nIDEvent == TIMER_STATUSBAR_INIT) {
+        KillTimer(TIMER_STATUSBAR_INIT);  // 只执行一次
+        // 强制重新计算状态栏分区宽度
+        CRect rc;
+        GetClientRect(&rc);
+        OnSize(SIZE_RESTORED, rc.Width(), rc.Height());
+    }
 
     __super::OnTimer(nIDEvent);
 }
@@ -2323,9 +2687,12 @@ void CMy2015RemoteDlg::UpdateStatusBarStats()
             strRuntime = _TR("运行:") + CString(_T(" ")) + strTime + _T(" ") + _TR("(无崩溃)");
         }
     }
-    m_StatusBar.SetPaneText(1, strRuntime);
+    // === 分区1：FRP 地址 ===
+    m_StatusBar.SetPaneText(1, m_strFrpAddr);  // 空时清除默认文本
 
-    // === 分区2：到期时间 ===
+    m_StatusBar.SetPaneText(2, strRuntime);
+
+    // === 分区3：到期时间 ===
     if (!m_strExpireDate.IsEmpty()) {
         // 解析到期日期 (YYYYMMDD)
         int year = _ttoi(m_strExpireDate.Left(4));
@@ -2362,7 +2729,7 @@ void CMy2015RemoteDlg::UpdateStatusBarStats()
             strDays.Format(_T("(%lld"), diffDays);
             strExpire = _TR("到期:") + CString(_T(" ")) + strDate + _T(" ") + strDays + _TR("天") + _T(")");
         }
-        m_StatusBar.SetPaneText(2, strExpire);
+        m_StatusBar.SetPaneText(3, strExpire);
     }
 }
 
@@ -2435,6 +2802,7 @@ void CMy2015RemoteDlg::Release()
     }
     Sleep(500);
     StopAllFrpClients();
+    StopFrpcAuto();  // 停止 FRP 自动代理
 
     THIS_APP->Destroy();
     SAFE_DELETE(m_gridDlg);
@@ -3701,8 +4069,8 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
             Mprintf("授权数据长度不足: %u\n", len);
         }
 
-        // 构建响应：[valid:4][message\0][authorization\0][renewal_passcode\0][renewal_hmac\0]
-        char resp[300] = { 0 };
+        // 构建响应：[valid:4][message\0][authorization\0][renewal_passcode\0][renewal_hmac\0][frp_config\0][reserved\0]
+        char resp[400] = { 0 };  // 增加缓冲区大小以容纳 frpConfig
         memcpy(resp, &valid, sizeof(valid));
         std::string msgStr = valid ? _TR("此程序已获授权，请遵守授权协议，感谢合作") : _TR("未获授权或消息哈希校验失败，可能有使用限制");
         // 版本比较：如果服务端版本更高或客户端未上报版本，追加升级提醒
@@ -3728,7 +4096,30 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
             memcpy(resp + offset, renewalPasscode.c_str(), renewalPasscode.length() + 1);
             offset += renewalPasscode.length() + 1;
             memcpy(resp + offset, renewalHmac.c_str(), renewalHmac.length() + 1);
+            offset += renewalHmac.length() + 1;
+        } else {
+            // 空的续期信息，占两个 null terminator
+            offset += 2;
         }
+
+        // FRP 配置追加在续期信息之后（仅当授权有效时）
+        std::string frpConfig;
+        if (valid && len > 20) {
+            std::string snForFrp(szBuffer + 1, szBuffer + 20);
+            // 去除末尾空字符
+            while (!snForFrp.empty() && snForFrp.back() == '\0')
+                snForFrp.pop_back();
+            frpConfig = LoadLicenseFrpConfig(snForFrp);
+        }
+        if (!frpConfig.empty() && offset + frpConfig.length() + 1 < sizeof(resp)) {
+            memcpy(resp + offset, frpConfig.c_str(), frpConfig.length() + 1);
+            offset += frpConfig.length() + 1;
+        } else {
+            offset += 1;  // 空的 frpConfig
+        }
+
+        // Reserved 字段（预留，当前为空）
+        offset += 1;  // 空的 reserved
 
         ContextObject->Send2Client((PBYTE)resp, sizeof(resp));
         break;
@@ -4401,21 +4792,42 @@ void CMy2015RemoteDlg::RemoveFromHostList(context* ctx)
 {
     if (!ctx) return;
     uint64_t clientID = ctx->GetClientID();
+
+    // 方案1：通过索引快速查找（如果索引有效且匹配）
     auto indexIt = m_ClientIndex.find(clientID);
-    if (indexIt == m_ClientIndex.end()) return;
+    if (indexIt != m_ClientIndex.end()) {
+        size_t idx = indexIt->second;
+        if (idx < m_HostList.size() && m_HostList[idx] == ctx) {
+            // 索引有效且指向正确的 context
+            m_HostList.erase(m_HostList.begin() + idx);
+            m_ClientIndex.erase(indexIt);
+            // 更新后续元素的索引
+            for (size_t i = idx; i < m_HostList.size(); ++i) {
+                context* c = m_HostList[i];
+                if (c) {
+                    m_ClientIndex[c->GetClientID()] = i;
+                }
+            }
+            return;
+        }
+    }
 
-    size_t idx = indexIt->second;
-    if (idx >= m_HostList.size()) return;
-
-    // 从 vector 中移除
-    m_HostList.erase(m_HostList.begin() + idx);
-    m_ClientIndex.erase(indexIt);
-
-    // 更新后续元素的索引
-    for (size_t i = idx; i < m_HostList.size(); ++i) {
-        context* c = m_HostList[i];
-        if (c) {
-            m_ClientIndex[c->GetClientID()] = i;
+    // 方案2：索引不存在或不匹配，遍历查找（处理重复 ID 的情况）
+    for (size_t i = 0; i < m_HostList.size(); ++i) {
+        if (m_HostList[i] == ctx) {
+            m_HostList.erase(m_HostList.begin() + i);
+            // 如果索引指向的是被删除的元素，也删除索引
+            if (indexIt != m_ClientIndex.end() && indexIt->second == i) {
+                m_ClientIndex.erase(indexIt);
+            }
+            // 更新后续元素的索引
+            for (size_t j = i; j < m_HostList.size(); ++j) {
+                context* c = m_HostList[j];
+                if (c) {
+                    m_ClientIndex[c->GetClientID()] = j;
+                }
+            }
+            return;
         }
     }
 }
@@ -7745,6 +8157,12 @@ void CMy2015RemoteDlg::OnToolV2PrivateKey()
 void CMy2015RemoteDlg::OnMenuNotifySettings()
 {
     NotifySettingsDlg dlg(this);
+    dlg.DoModal();
+}
+
+void CMy2015RemoteDlg::OnFrpsForSub()
+{
+    CFrpsForSubDlg dlg(this);
     dlg.DoModal();
 }
 

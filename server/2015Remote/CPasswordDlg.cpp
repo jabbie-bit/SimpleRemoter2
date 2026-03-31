@@ -11,6 +11,8 @@
 #include "2015RemoteDlg.h"
 #include "LicenseFile.h"
 #include "generated_hash.h"
+#include "InputDlg.h"
+#include "FrpsForSubDlg.h"
 
 // 外部函数声明
 extern std::vector<std::string> splitString(const std::string& str, char delimiter);
@@ -95,7 +97,8 @@ std::string GetLicensesPath()
 // 保存授权信息到 INI 文件
 bool SaveLicenseInfo(const std::string& deviceID, const std::string& passcode,
                      const std::string& hmac, const std::string& remark,
-                     const std::string& authorization)
+                     const std::string& authorization,
+                     const std::string& frpConfig)
 {
     std::string iniPath = GetLicensesPath();
     config cfg(iniPath);
@@ -111,6 +114,11 @@ bool SaveLicenseInfo(const std::string& deviceID, const std::string& passcode,
     // 注意：authorization 参数传入时已经是混淆后的格式，直接保存
     if (!authorization.empty()) {
         cfg.SetStr(deviceID, "Authorization", authorization);
+    }
+
+    // 保存 FRP 配置（用于为下级提供 FRP 代理）
+    if (!frpConfig.empty()) {
+        cfg.SetStr(deviceID, "FrpConfig", frpConfig);
     }
 
     // 保存创建时间
@@ -143,6 +151,14 @@ bool LoadLicenseInfo(const std::string& deviceID, std::string& passcode,
     hmac = cfg.GetStr(deviceID, "HMAC", "");
     remark = cfg.GetStr(deviceID, "Remark", "");
     return true;
+}
+
+// 加载授权的 FRP 配置
+std::string LoadLicenseFrpConfig(const std::string& deviceID)
+{
+    std::string iniPath = GetLicensesPath();
+    config cfg(iniPath);
+    return cfg.GetStr(deviceID, "FrpConfig", "");
 }
 
 // IP 列表管理常量
@@ -501,6 +517,7 @@ CPwdGenDlg::CPwdGenDlg(CWnd* pParent /*=nullptr*/)
     , m_bIsLocalDevice(FALSE)
     , m_nVersion(0)
     , m_sPrivateKeyPath(_T(""))
+    , m_nFrpRemotePort(0)
 {
 
 }
@@ -539,6 +556,12 @@ void CPwdGenDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Control(pDX, IDC_BUTTON_GEN_KEYPAIR, m_BtnGenKeyPair);
     DDX_CBIndex(pDX, IDC_COMBO_VERSION, m_nVersion);
     DDX_Text(pDX, IDC_EDIT_PRIVATEKEY, m_sPrivateKeyPath);
+    // FRP 控件
+    DDX_Control(pDX, IDC_CHECK_FRP_PROXY, m_CheckFrpProxy);
+    DDX_Control(pDX, IDC_EDIT_FRP_REMOTE_PORT, m_EditFrpRemotePort);
+    DDX_Control(pDX, IDC_BTN_FRP_AUTO_PORT, m_BtnFrpAutoPort);
+    DDX_Control(pDX, IDC_STATIC_FRP_INFO, m_StaticFrpInfo);
+    DDX_Text(pDX, IDC_EDIT_FRP_REMOTE_PORT, m_nFrpRemotePort);
 }
 
 
@@ -548,6 +571,8 @@ BEGIN_MESSAGE_MAP(CPwdGenDlg, CDialogEx)
     ON_CBN_SELCHANGE(IDC_COMBO_VERSION, &CPwdGenDlg::OnCbnSelchangeComboVersion)
     ON_BN_CLICKED(IDC_BUTTON_BROWSE_KEY, &CPwdGenDlg::OnBnClickedButtonBrowseKey)
     ON_BN_CLICKED(IDC_BUTTON_GEN_KEYPAIR, &CPwdGenDlg::OnBnClickedButtonGenKeypair)
+    ON_BN_CLICKED(IDC_CHECK_FRP_PROXY, &CPwdGenDlg::OnBnClickedCheckFrpProxy)
+    ON_BN_CLICKED(IDC_BTN_FRP_AUTO_PORT, &CPwdGenDlg::OnBnClickedBtnFrpAutoPort)
 END_MESSAGE_MAP()
 
 
@@ -764,6 +789,27 @@ BOOL CPwdGenDlg::OnInitDialog()
         SetWindowText(title);
     }
 
+    // 初始化 FRP 代理控件
+    SetDlgItemText(IDC_CHECK_FRP_PROXY, _TR("提供 FRP 代理"));
+    SetDlgItemText(IDC_STATIC_FRP_REMOTE_PORT, _TR("远程端口:"));
+    SetDlgItemText(IDC_BTN_FRP_AUTO_PORT, _TR("自动"));
+    m_nFrpRemotePort = 0;
+    m_sFrpConfig.clear();
+
+    // 检查 FRPS 是否已配置
+    if (CFrpsForSubDlg::IsFrpsConfigured()) {
+        FrpsConfig frpsConfig = CFrpsForSubDlg::GetFrpsConfig();
+        CString frpsInfo;
+        frpsInfo.Format(_T("FRPS: %s:%d"), CString(frpsConfig.server.c_str()), frpsConfig.port);
+        m_StaticFrpInfo.SetWindowText(frpsInfo);
+        m_CheckFrpProxy.EnableWindow(TRUE);
+    } else {
+        m_StaticFrpInfo.SetWindowText(_TR("(未配置 FRPS，请先通过 扩展→下级FRP代理设置)"));
+        m_CheckFrpProxy.EnableWindow(FALSE);
+    }
+    m_CheckFrpProxy.SetCheck(BST_UNCHECKED);
+    UpdateFrpControlStates();
+
     return TRUE;  // return TRUE unless you set the focus to a control
     // 异常: OCX 属性页应返回 FALSE
 }
@@ -905,6 +951,58 @@ void CPwdGenDlg::OnBnClickedButtonGenKeypair()
     MessageBox(msg, _TR("成功"), MB_OK | MB_ICONINFORMATION);
 }
 
+void CPwdGenDlg::OnBnClickedCheckFrpProxy()
+{
+    UpdateFrpControlStates();
+
+    // 勾选时，如果端口为 0，自动填入下一个可用端口
+    if (m_CheckFrpProxy.GetCheck() == BST_CHECKED) {
+        CString portText;
+        m_EditFrpRemotePort.GetWindowText(portText);
+        int currentPort = _ttoi(portText);
+        if (currentPort <= 0) {
+            int port = CFrpsForSubDlg::FindNextAvailablePort();
+            if (port > 0) {
+                CString portStr;
+                portStr.Format(_T("%d"), port);
+                m_EditFrpRemotePort.SetWindowText(portStr);
+            }
+        }
+    }
+}
+
+void CPwdGenDlg::OnBnClickedBtnFrpAutoPort()
+{
+    // 自动查找下一个可用端口（不保存，等保存授权时再记录）
+    int port = CFrpsForSubDlg::FindNextAvailablePort();
+    if (port > 0) {
+        m_nFrpRemotePort = port;
+        CString portStr;
+        portStr.Format(_T("%d"), port);
+        m_EditFrpRemotePort.SetWindowText(portStr);
+    } else {
+        MessageBoxL("端口范围已满，无法自动分配!", "提示", MB_OK | MB_ICONWARNING);
+    }
+}
+
+void CPwdGenDlg::UpdateFrpControlStates()
+{
+    BOOL frpEnabled = (m_CheckFrpProxy.GetCheck() == BST_CHECKED);
+    BOOL frpsConfigured = CFrpsForSubDlg::IsFrpsConfigured();
+
+    m_EditFrpRemotePort.EnableWindow(frpEnabled && frpsConfigured);
+    m_BtnFrpAutoPort.EnableWindow(frpEnabled && frpsConfigured);
+
+    // 如果启用 FRP 且端口为空，自动分配一个
+    if (frpEnabled && frpsConfigured && m_nFrpRemotePort == 0) {
+        CString portText;
+        m_EditFrpRemotePort.GetWindowText(portText);
+        if (portText.IsEmpty() || _ttoi(portText) == 0) {
+            // 不自动分配，让用户点击"自动"或手动输入
+        }
+    }
+}
+
 void CPwdGenDlg::OnBnClickedButtonSaveLicense()
 {
     UpdateData(TRUE);
@@ -919,13 +1017,42 @@ void CPwdGenDlg::OnBnClickedButtonSaveLicense()
     CString remark;
     // 这里可以弹出一个简单的输入对话框获取备注，或者直接保存
 
+    // 检查是否启用了 FRP 代理
+    std::string frpConfig;
+    if (m_CheckFrpProxy.GetCheck() == BST_CHECKED && CFrpsForSubDlg::IsFrpsConfigured()) {
+        // 获取远程端口
+        CString portText;
+        m_EditFrpRemotePort.GetWindowText(portText);
+        int remotePort = _ttoi(portText);
+
+        if (remotePort < 1024 || remotePort > 65535) {
+            MessageBoxL("FRP 远程端口无效（1024-65535）", "提示", MB_OK | MB_ICONWARNING);
+            m_EditFrpRemotePort.SetFocus();
+            return;
+        }
+
+        // 获取 FRPS 配置
+        FrpsConfig frpsConfig = CFrpsForSubDlg::GetFrpsConfig();
+
+        // 生成 FRP 配置（有效期设为最大值，由 License 控制过期）
+        // authMode: 0 = 官方 FRP (token), 1 = 自定义 FRP (privilegeKey)
+        // 注意：expireDate 最大 20371231，因为自定义 FRP 的 timestamp 参数是 32 位 long，2038 年后会溢出
+        frpConfig = GenerateFrpConfig(frpsConfig.server, frpsConfig.port, remotePort, frpsConfig.token, "20371231", frpsConfig.authMode);
+        if (!frpConfig.empty()) {
+            // 记录端口分配
+            CFrpsForSubDlg::RecordPortAllocation(remotePort, m_sDeviceID.GetString());
+            Mprintf("[FRP] 为序列号 %s 分配端口 %d\n", m_sDeviceID.GetString(), remotePort);
+        }
+    }
+
     // 保存授权信息到数据库
     bool success = SaveLicenseInfo(
         m_sDeviceID.GetString(),
         m_sPassword.GetString(),
         m_sHMAC.GetString(),
         remark.GetString(),
-        m_sAuthorization.GetString()
+        m_sAuthorization.GetString(),
+        frpConfig
     );
 
     if (!success) {
@@ -937,9 +1064,9 @@ void CPwdGenDlg::OnBnClickedButtonSaveLicense()
     if (MessageBoxL("授权已保存到数据库。\n\n是否同时导出为文件？\n导出后可发送给目标设备导入使用。",
                     "导出授权", MB_YESNO | MB_ICONQUESTION) == IDYES) {
 
-        // 构建默认文件名
+        // 构建默认文件名（使用完整 SN）
         CString defaultName;
-        defaultName.Format(_T("YAMA_%s.lic"), m_sDeviceID.Left(9).GetString());
+        defaultName.Format(_T("YAMA_%s.lic"), m_sDeviceID.GetString());
 
         // 弹出文件保存对话框
         CString filter = _T("YAMA License (*.lic)|*.lic|All Files (*.*)|*.*||");
@@ -956,7 +1083,8 @@ void CPwdGenDlg::OnBnClickedButtonSaveLicense()
                     std::string(CT2A(m_sDeviceID.GetString())),
                     std::string(CT2A(m_sPassword.GetString())),
                     std::string(CT2A(m_sHMAC.GetString())),
-                    std::string(CT2A(m_sAuthorization.GetString())))) {
+                    std::string(CT2A(m_sAuthorization.GetString())),
+                    frpConfig)) {
                 CString msg;
                 msg.Format(_T("%s\n%s"), _TR("授权文件已导出到："), dlg.GetPathName().GetString());
                 MessageBox(msg, _TR("导出成功"), MB_OK | MB_ICONINFORMATION);

@@ -12,6 +12,7 @@
 #define IDR_STATUSBAR_PROCESS           103
 #define IDR_STATUSBAR_RUNTIME           104
 #define IDR_STATUSBAR_EXPIRE            105
+#define IDR_STATUSBAR_FRP               106
 #define IDR_MAINFRAME                   128
 #define IDR_MENU_LIST_ONLINE            129
 #define IDB_BITMAP_ONLINE               130
@@ -640,6 +641,31 @@
 #define IDD_DIALOG_IP_HISTORY           337
 #define IDC_LIST_IP_HISTORY             2477
 #define IDC_STATIC_IP_SUMMARY           2478
+#define IDC_CHECK_FRP_PROXY             2481
+#define IDC_EDIT_FRP_REMOTE_PORT        2482
+#define IDC_STATIC_FRP_REMOTE_PORT      2483
+#define IDC_BTN_FRP_AUTO_PORT           2484
+#define IDC_STATIC_FRP_INFO             2485
+#define IDD_DIALOG_FRPS_FOR_SUB         338
+#define IDC_CHECK_FRPS_ENABLED          2500
+#define IDC_EDIT_FRPS_SERVER            2501
+#define IDC_EDIT_FRPS_PORT              2502
+#define IDC_EDIT_FRPS_TOKEN             2503
+#define IDC_BTN_SHOW_TOKEN              2504
+#define IDC_EDIT_PORT_START             2505
+#define IDC_EDIT_PORT_END               2506
+#define IDC_GROUP_FRPS_SERVER           2507
+#define IDC_GROUP_PORT_RANGE            2508
+#define IDC_STATIC_FRPS_SERVER          2509
+#define IDC_STATIC_FRPS_PORT            2510
+#define IDC_STATIC_FRPS_TOKEN           2511
+#define IDC_STATIC_PORT_START           2512
+#define IDC_STATIC_PORT_END             2513
+#define IDC_STATIC_FRPS_TIP             2514
+#define IDC_RADIO_FRP_OFFICIAL          2515
+#define IDC_RADIO_FRP_CUSTOM            2516
+#define IDC_STATIC_FRP_AUTHMODE         2517
+#define ID_FRPS_FOR_SUB                 33039
 #define ID_ONLINE_UPDATE                32772
 #define ID_ONLINE_MESSAGE               32773
 #define ID_ONLINE_DELETE                32775
@@ -869,9 +895,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        337
-#define _APS_NEXT_COMMAND_VALUE         33039
-#define _APS_NEXT_CONTROL_VALUE         2423
+#define _APS_NEXT_RESOURCE_VALUE        339
+#define _APS_NEXT_COMMAND_VALUE         33040
+#define _APS_NEXT_CONTROL_VALUE         2515
 #define _APS_NEXT_SYMED_VALUE           105
 #endif
 #endif

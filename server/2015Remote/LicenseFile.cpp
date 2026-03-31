@@ -45,7 +45,8 @@ static std::string BuildChecksumContent(const std::string& magic,
                                          const std::string& sn,
                                          const std::string& password,
                                          const std::string& pwdHmac,
-                                         const std::string& authorization) {
+                                         const std::string& authorization,
+                                         const std::string& frpConfig = "") {
     std::string content;
     content += magic + "|";
     content += std::to_string(version) + "|";
@@ -53,7 +54,8 @@ static std::string BuildChecksumContent(const std::string& magic,
     content += sn + "|";
     content += password + "|";
     content += pwdHmac + "|";
-    content += authorization;
+    content += authorization + "|";
+    content += frpConfig;
     return content;
 }
 
@@ -112,14 +114,15 @@ bool ExportLicenseFile(const std::string& filePath,
                        const std::string& sn,
                        const std::string& password,
                        const std::string& pwdHmac,
-                       const std::string& authorization) {
+                       const std::string& authorization,
+                       const std::string& frpConfig) {
     // 1. Generate create time
     std::string createTime = GetCurrentTimeString();
 
     // 2. Calculate checksum
     std::string checksumContent = BuildChecksumContent(
         LICENSE_MAGIC, LICENSE_FILE_VERSION, createTime,
-        sn, password, pwdHmac, authorization);
+        sn, password, pwdHmac, authorization, frpConfig);
     std::string checksum = "sha256:" + hashSHA256(checksumContent);
 
     // 3. Build JSON using jsoncpp
@@ -133,6 +136,9 @@ bool ExportLicenseFile(const std::string& filePath,
     license["password"] = password;
     license["pwdHmac"] = pwdHmac;
     license["authorization"] = authorization;
+    if (!frpConfig.empty()) {
+        license["frpConfig"] = frpConfig;
+    }
     root["license"] = license;
 
     root["checksum"] = checksum;
@@ -214,6 +220,7 @@ LicenseImportResult ImportLicenseFile(const std::string& filePath,
     std::string password = license.get("password", "").asString();
     std::string pwdHmac = license.get("pwdHmac", "").asString();
     std::string authorization = license.get("authorization", "").asString();
+    std::string frpConfig = license.get("frpConfig", "").asString();
 
     // 7. Check required fields
     if (sn.empty() || password.empty() || pwdHmac.empty()) {
@@ -224,7 +231,7 @@ LicenseImportResult ImportLicenseFile(const std::string& filePath,
     // 8. Verify checksum
     std::string storedChecksum = root.get("checksum", "").asString();
     std::string expectedContent = BuildChecksumContent(
-        magic, version, createTime, sn, password, pwdHmac, authorization);
+        magic, version, createTime, sn, password, pwdHmac, authorization, frpConfig);
     std::string expectedChecksum = "sha256:" + hashSHA256(expectedContent);
 
     if (storedChecksum != expectedChecksum) {
@@ -247,6 +254,7 @@ LicenseImportResult ImportLicenseFile(const std::string& filePath,
     outData.password = password;
     outData.pwdHmac = pwdHmac;
     outData.authorization = authorization;
+    outData.frpConfig = frpConfig;
     outData.createTime = createTime;
     outData.version = version;
 
@@ -261,6 +269,9 @@ bool ApplyLicenseData(const LicenseFileData& data) {
 
     // Always set Authorization (clear old value if empty)
     THIS_CFG.SetStr("settings", "Authorization", data.authorization);
+
+    // Save FRP config (clear old value if empty)
+    THIS_CFG.SetStr("settings", "FrpConfig", data.frpConfig);
 
     return true;
 }

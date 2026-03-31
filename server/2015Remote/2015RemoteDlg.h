@@ -241,6 +241,7 @@ public:
     CStatusBar m_StatusBar;          //状态条
     ULONGLONG m_ullStartTime = 0;    // 程序启动时间 (GetTickCount64)
     CString m_strExpireDate;         // 到期日期 (YYYYMMDD)，空表示无授权
+    CString m_strFrpAddr;            // FRP 地址 (IP:Port)，由上级提供
     void UpdateStatusBarStats();     // 更新状态栏统计信息
     CTrueColorToolBar m_ToolBar;
     CGridDialog * m_gridDlg = NULL;
@@ -291,6 +292,24 @@ public:
     void ApplyFrpSettings();
     void InitFrpClients();
     void StopAllFrpClients();
+
+    // FRP 自动代理（由上级提供配置）
+    struct FrpAutoConfig {
+        bool enabled = false;
+        std::string serverAddr;      // 上级的 FRPS 地址
+        int serverPort = 7000;       // 上级的 FRPS 端口
+        int remotePort = 0;          // 上级分配的远程端口
+        std::string expireDate;      // YYYYMMDD 格式
+        std::string privilegeKey;    // 32字符(MD5) 或 ENC:xxx(编码的token)
+        bool isEncodedToken = false; // true: privilegeKey 是编码的 token (官方FRP模式)
+    };
+    FrpAutoConfig m_frpAutoConfig;
+    int m_frpAutoStatus = STATUS_UNKNOWN;  // FRP 自动代理状态
+    HANDLE m_hFrpAutoThread = NULL;        // FRP 自动代理线程句柄
+    static FrpAutoConfig ParseFrpAutoConfig(const std::string& config);
+    void StartFrpcAuto(const FrpAutoConfig& cfg);
+    void StopFrpcAuto();
+    void InitFrpcAuto();  // 启动时自动恢复
     bool CheckValid(int trail = 14);
     BOOL ShouldRemoteControl();
     afx_msg void OnTimer(UINT_PTR nIDEvent);
@@ -431,6 +450,7 @@ public:
     afx_msg void OnToolImportLicense();
     afx_msg void OnToolV2PrivateKey();
     afx_msg void OnMenuNotifySettings();
+    afx_msg void OnFrpsForSub();
     afx_msg void OnOnlineLoginNotify();
     afx_msg void OnExecuteTestrun();
     afx_msg void OnExecuteGhost();

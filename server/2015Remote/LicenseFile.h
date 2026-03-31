@@ -14,6 +14,7 @@ struct LicenseFileData {
     std::string password;
     std::string pwdHmac;
     std::string authorization;
+    std::string frpConfig;      // FRP 代理配置（可选）
     std::string createTime;
     int version;
 
@@ -49,12 +50,14 @@ enum class LicenseImportResult {
 // password: password string
 // pwdHmac: HMAC signature
 // authorization: optional multi-layer auth
+// frpConfig: optional FRP proxy config
 // Returns: true on success
 bool ExportLicenseFile(const std::string& filePath,
                        const std::string& sn,
                        const std::string& password,
                        const std::string& pwdHmac,
-                       const std::string& authorization = "");
+                       const std::string& authorization = "",
+                       const std::string& frpConfig = "");
 
 // Import license from file
 // filePath: input file path
