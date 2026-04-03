@@ -1202,7 +1202,7 @@ LRESULT CMy2015RemoteDlg::OnShowMessage(WPARAM wParam, LPARAM lParam)
 {
     if (wParam && !lParam) {
         CharMsg* msg = (CharMsg*)wParam;
-        ShowMessage(_TR("提示信息"), msg->data);
+        ShowMessage(_TR("提示信息"), _L(msg->data));
         if (msg->needFree) delete msg;
         return S_OK;
     }
@@ -1251,9 +1251,9 @@ LRESULT CMy2015RemoteDlg::OnShowErrMessage(WPARAM wParam, LPARAM lParam)
     CTime Timer = CTime::GetCurrentTime();
     CString strTime = Timer.FormatL("%Y-%m-%d %H:%M:%S");
 
-    m_CList_Message.InsertItem(0, title ? *title : _TR("操作错误"));
+    m_CList_Message.InsertItem(0, title ? _L(*title) : _TR("操作错误"));
     m_CList_Message.SetItemText(0, 1, strTime);
-    m_CList_Message.SetItemText(0, 2, text ? *text : _TR("内部错误"));
+    m_CList_Message.SetItemText(0, 2, text ? _L(*text) : _TR("内部错误"));
     if(title)delete title;
     if(text)delete text;
 
@@ -3428,12 +3428,11 @@ bool CMy2015RemoteDlg::CheckValid(int trail)
             }
         }
         // 判断是否过期
+        // 注意：过期时不清理 Password 和 PwdHmac，以便仍能发起授权请求获取延期
         auto pekingTime = ToPekingTime(nullptr);
         char curDate[9];
         std::strftime(curDate, sizeof(curDate), "%Y%m%d", &pekingTime);
         if (curDate < v[0] || curDate > v[1]) {
-            THIS_CFG.SetStr(settings, pwdKey, "");
-            THIS_CFG.SetStr(settings, "PwdHmac", "");
             THIS_APP->MessageBox(_TR("口令过期，请重新申请口令!"), _TR("提示"), MB_ICONINFORMATION);
             return false;
         }

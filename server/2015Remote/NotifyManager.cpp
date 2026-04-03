@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "NotifyManager.h"
 #include "context.h"
+#include "common/iniFile.h"
 #include <thread>
 #include <fstream>
 #include <sstream>
@@ -76,63 +77,43 @@ void NotifyManager::SetConfig(const NotifyConfig& config)
 void NotifyManager::LoadConfig()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    std::string path = GetConfigPath();
-    char buffer[1024];
+    config cfg(GetConfigPath());
 
     // SMTP settings
-    GetPrivateProfileStringA("SMTP", "Server", "smtp.gmail.com", buffer, sizeof(buffer), path.c_str());
-    m_config.smtp.server = buffer;
-
-    m_config.smtp.port = GetPrivateProfileIntA("SMTP", "Port", 587, path.c_str());
-    m_config.smtp.useSSL = GetPrivateProfileIntA("SMTP", "UseSSL", 1, path.c_str()) != 0;
-
-    GetPrivateProfileStringA("SMTP", "Username", "", buffer, sizeof(buffer), path.c_str());
-    m_config.smtp.username = buffer;
-
-    GetPrivateProfileStringA("SMTP", "Password", "", buffer, sizeof(buffer), path.c_str());
-    m_config.smtp.password = DecryptPassword(buffer);
-
-    GetPrivateProfileStringA("SMTP", "Recipient", "", buffer, sizeof(buffer), path.c_str());
-    m_config.smtp.recipient = buffer;
+    m_config.smtp.server = cfg.GetStr("SMTP", "Server", "smtp.gmail.com");
+    m_config.smtp.port = cfg.GetInt("SMTP", "Port", 587);
+    m_config.smtp.useSSL = cfg.GetInt("SMTP", "UseSSL", 1) != 0;
+    m_config.smtp.username = cfg.GetStr("SMTP", "Username", "");
+    m_config.smtp.password = DecryptPassword(cfg.GetStr("SMTP", "Password", ""));
+    m_config.smtp.recipient = cfg.GetStr("SMTP", "Recipient", "");
 
     // Rule settings (currently only one rule)
     NotifyRule& rule = m_config.GetRule();
-    rule.enabled = GetPrivateProfileIntA("Rule_0", "Enabled", 0, path.c_str()) != 0;
-    rule.triggerType = (NotifyTriggerType)GetPrivateProfileIntA("Rule_0", "TriggerType", NOTIFY_TRIGGER_HOST_ONLINE, path.c_str());
-    rule.columnIndex = GetPrivateProfileIntA("Rule_0", "ColumnIndex", ONLINELIST_COMPUTER_NAME, path.c_str());
-
-    GetPrivateProfileStringA("Rule_0", "MatchPattern", "", buffer, sizeof(buffer), path.c_str());
-    rule.matchPattern = buffer;
+    rule.enabled = cfg.GetInt("Rule_0", "Enabled", 0) != 0;
+    rule.triggerType = (NotifyTriggerType)cfg.GetInt("Rule_0", "TriggerType", NOTIFY_TRIGGER_HOST_ONLINE);
+    rule.columnIndex = cfg.GetInt("Rule_0", "ColumnIndex", ONLINELIST_COMPUTER_NAME);
+    rule.matchPattern = cfg.GetStr("Rule_0", "MatchPattern", "");
 }
 
 void NotifyManager::SaveConfig()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    std::string path = GetConfigPath();
-    char buffer[32];
+    config cfg(GetConfigPath());
 
     // SMTP settings
-    WritePrivateProfileStringA("SMTP", "Server", m_config.smtp.server.c_str(), path.c_str());
-
-    sprintf_s(buffer, "%d", m_config.smtp.port);
-    WritePrivateProfileStringA("SMTP", "Port", buffer, path.c_str());
-
-    WritePrivateProfileStringA("SMTP", "UseSSL", m_config.smtp.useSSL ? "1" : "0", path.c_str());
-    WritePrivateProfileStringA("SMTP", "Username", m_config.smtp.username.c_str(), path.c_str());
-    WritePrivateProfileStringA("SMTP", "Password", EncryptPassword(m_config.smtp.password).c_str(), path.c_str());
-    WritePrivateProfileStringA("SMTP", "Recipient", m_config.smtp.recipient.c_str(), path.c_str());
+    cfg.SetStr("SMTP", "Server", m_config.smtp.server);
+    cfg.SetInt("SMTP", "Port", m_config.smtp.port);
+    cfg.SetInt("SMTP", "UseSSL", m_config.smtp.useSSL ? 1 : 0);
+    cfg.SetStr("SMTP", "Username", m_config.smtp.username);
+    cfg.SetStr("SMTP", "Password", EncryptPassword(m_config.smtp.password));
+    cfg.SetStr("SMTP", "Recipient", m_config.smtp.recipient);
 
     // Rule settings
     const NotifyRule& rule = m_config.GetRule();
-    WritePrivateProfileStringA("Rule_0", "Enabled", rule.enabled ? "1" : "0", path.c_str());
-
-    sprintf_s(buffer, "%d", (int)rule.triggerType);
-    WritePrivateProfileStringA("Rule_0", "TriggerType", buffer, path.c_str());
-
-    sprintf_s(buffer, "%d", rule.columnIndex);
-    WritePrivateProfileStringA("Rule_0", "ColumnIndex", buffer, path.c_str());
-
-    WritePrivateProfileStringA("Rule_0", "MatchPattern", rule.matchPattern.c_str(), path.c_str());
+    cfg.SetInt("Rule_0", "Enabled", rule.enabled ? 1 : 0);
+    cfg.SetInt("Rule_0", "TriggerType", (int)rule.triggerType);
+    cfg.SetInt("Rule_0", "ColumnIndex", rule.columnIndex);
+    cfg.SetStr("Rule_0", "MatchPattern", rule.matchPattern);
 }
 
 bool NotifyManager::ShouldNotify(context* ctx, std::string& outMatchedKeyword, const CString& remark)

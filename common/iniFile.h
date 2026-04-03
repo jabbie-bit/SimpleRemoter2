@@ -171,7 +171,7 @@ public:
             ::GetModuleFileNameA(NULL, m_IniFilePath, sizeof(m_IniFilePath));
             GET_FILEPATH(m_IniFilePath, "settings.ini");
         } else {
-            memcpy(m_IniFilePath, path.c_str(), path.length());
+            strncpy_s(m_IniFilePath, sizeof(m_IniFilePath), path.c_str(), _TRUNCATE);
         }
     }
 
