@@ -118,13 +118,16 @@ static void OnCrashWindowChange(int crashCount, ULONGLONG firstCrashTime)
 }
 
 // 崩溃保护回调：写入保护标志
+// 注意：不在这里停止服务，由 MonitorLoop 检测 crashProtected 后自动退出
 static void OnAgentCrashProtection(void)
 {
     THIS_CFG.SetInt(CFG_CRASH_SECTION, CFG_CRASH_PROTECTED, 1);
+    // 切换到正常模式，避免用户无法启动程序
+    THIS_CFG.SetInt("settings", "RunNormal", 1);
     // 清除崩溃窗口状态（保护已触发，不需要再保持窗口状态）
     THIS_CFG.SetInt(CFG_CRASH_SECTION, CFG_CRASH_WIN_COUNT, 0);
     THIS_CFG.SetStr(CFG_CRASH_SECTION, CFG_CRASH_WIN_START, "0");
-    Mprintf("Crash protection flag written to config");
+    Mprintf("Crash protection triggered: switched to normal mode");
 }
 
 BOOL ServerService_CheckStatus(BOOL* registered, BOOL* running,
@@ -444,11 +447,17 @@ DWORD WINAPI ServerService_WorkerThread(LPVOID lpParam)
     Mprintf("Session monitor started successfully");
     Mprintf("Yama GUI will be launched automatically in user sessions");
 
-    // 主循环，只等待停止信号
-    while (WaitForSingleObject(g_StopEvent, 10000) != WAIT_OBJECT_0) {
+    // 主循环，等待停止信号或监控器停止
+    // 使用 1 秒超时以快速响应监控器停止
+    while (WaitForSingleObject(g_StopEvent, 1000) != WAIT_OBJECT_0) {
+        // 检查监控器是否已停止（例如代理以 EXIT_MANUAL_STOP 退出或崩溃保护触发）
+        if (!monitor.running) {
+            Mprintf("Monitor stopped - exiting worker thread");
+            break;
+        }
         heartbeatCount++;
-        if (heartbeatCount % 6 == 0) {  // 每60秒记录一次（10秒 * 6 = 60秒）
-            sprintf_s(buf, sizeof(buf), "Service heartbeat - uptime: %d minutes", heartbeatCount / 6);
+        if (heartbeatCount % 60 == 0) {  // 每60秒记录一次（1秒 * 60 = 60秒）
+            sprintf_s(buf, sizeof(buf), "Service heartbeat - uptime: %d minutes", heartbeatCount / 60);
             Mprintf(buf);
         }
     }

@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "ServerSessionMonitor.h"
+#include "CrashReport.h"
 #include <stdio.h>
 #include <tlhelp32.h>
 #include <userenv.h>
@@ -26,7 +27,8 @@ static void AgentArray_RemoveAt(ServerAgentProcessArray* arr, size_t index);
 // 崩溃保护辅助函数
 static void HandleFastCrash(ServerSessionMonitor* self, DWORD exitCode, ULONGLONG runtime);
 
-// 处理快速崩溃
+// 处理快速崩溃（用于崩溃保护，防止重启循环）
+// 注意：崩溃统计（onCrash）已在调用方处理，这里只处理崩溃窗口逻辑
 static void HandleFastCrash(ServerSessionMonitor* self, DWORD exitCode, ULONGLONG runtime)
 {
     char buf[256];
@@ -34,11 +36,6 @@ static void HandleFastCrash(ServerSessionMonitor* self, DWORD exitCode, ULONGLON
 
     sprintf_s(buf, sizeof(buf), "Fast crash detected: exitCode=0x%08X, runtime=%llu ms", exitCode, runtime);
     Mprintf(buf);
-
-    // 调用崩溃统计回调（每次崩溃都记录）
-    if (self->onCrash) {
-        self->onCrash(exitCode, runtime);
-    }
 
     // 检查是否在窗口期内
     if (self->crashCount == 0 || (now - self->firstCrashTime) > CRASH_WINDOW_MS) {
@@ -232,6 +229,20 @@ static void MonitorLoop(ServerSessionMonitor* self)
         // 清理已终止的进程
         CleanupDeadProcesses(self);
 
+        // 检查是否需要停止监控（可能在 CleanupDeadProcesses 中因 EXIT_MANUAL_STOP 设置）
+        if (!self->running) {
+            Mprintf("Monitor stop requested - exiting loop");
+            break;
+        }
+
+        // 检查是否触发了崩溃保护，如果是则退出监控循环
+        // 这会导致服务线程退出，进而停止整个服务
+        if (self->crashProtected) {
+            Mprintf("Crash protection triggered - stopping monitor loop");
+            self->running = FALSE;
+            break;
+        }
+
         // 枚举所有会话
         PWTS_SESSION_INFO pSessionInfo = NULL;
         DWORD dwCount = 0;
@@ -256,22 +267,15 @@ static void MonitorLoop(ServerSessionMonitor* self)
 
                     // 检查GUI是否在该会话中运行
                     if (!IsGuiRunningInSession(self, sessionId)) {
-                        // 检查是否触发了崩溃保护
-                        if (self->crashProtected) {
-                            if (loopCount % 5 == 1) {
-                                Mprintf("Crash protection active - agent auto-restart disabled");
-                            }
-                        } else {
-                            sprintf_s(buf, sizeof(buf), "GUI not running in session %d, launching...", (int)sessionId);
-                            Mprintf(buf);
+                        sprintf_s(buf, sizeof(buf), "GUI not running in session %d, launching...", (int)sessionId);
+                        Mprintf(buf);
 
-                            if (LaunchGuiInSession(self, sessionId)) {
-                                Mprintf("GUI launched successfully");
-                                // 给程序一些时间启动
-                                Sleep(2000);
-                            } else {
-                                Mprintf("Failed to launch GUI");
-                            }
+                        if (LaunchGuiInSession(self, sessionId)) {
+                            Mprintf("GUI launched successfully");
+                            // 给程序一些时间启动
+                            Sleep(2000);
+                        } else {
+                            Mprintf("Failed to launch GUI");
                         }
                     }
 
@@ -430,10 +434,23 @@ static void CleanupDeadProcesses(ServerSessionMonitor* self)
                     self->onAgentExit(exitCode, runtime);
                 }
 
-                // 检测快速崩溃（启动后短时间内异常退出）
-                // 只有 exitCode != 0 才视为崩溃，正常退出(0)不计入
-                if (exitCode != 0 && runtime < FAST_CRASH_TIME_MS && !self->crashProtected) {
-                    HandleFastCrash(self, exitCode, runtime);
+                // 检查是否是用户主动退出（通过菜单退出）
+                // 如果是，停止监控循环，不再重启代理
+                if (exitCode == EXIT_MANUAL_STOP) {
+                    Mprintf("Agent exited with EXIT_MANUAL_STOP - stopping monitor");
+                    self->running = FALSE;
+                }
+                // 统计所有崩溃（用于 MTBF 计算）
+                // exitCode != 0 且不是主动退出/重启请求，都视为崩溃
+                else if (exitCode != 0 && exitCode != EXIT_RESTART_REQUEST) {
+                    // 调用崩溃统计回调（所有崩溃都记录，用于 MTBF）
+                    if (self->onCrash) {
+                        self->onCrash(exitCode, runtime);
+                    }
+                    // 快速崩溃才触发崩溃保护（防止重启循环）
+                    if (runtime < FAST_CRASH_TIME_MS && !self->crashProtected) {
+                        HandleFastCrash(self, exitCode, runtime);
+                    }
                 }
 
                 SAFE_CLOSE_HANDLE(info->hProcess);
@@ -452,8 +469,12 @@ static void CleanupDeadProcesses(ServerSessionMonitor* self)
                 self->onAgentExit(0xFFFFFFFF, runtime);
             }
 
-            // 无法获取退出代码时也检测快速崩溃（保守处理）
-            // 使用特殊值 0xFFFFFFFF 表示未知退出代码
+            // 无法获取退出代码视为崩溃（保守处理）
+            // 调用崩溃统计回调（用于 MTBF）
+            if (self->onCrash) {
+                self->onCrash(0xFFFFFFFF, runtime);
+            }
+            // 快速崩溃才触发崩溃保护
             if (runtime < FAST_CRASH_TIME_MS && !self->crashProtected) {
                 HandleFastCrash(self, 0xFFFFFFFF, runtime);
             }

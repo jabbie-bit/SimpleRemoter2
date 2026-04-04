@@ -467,29 +467,27 @@ BOOL CMy2015RemoteApp::InitInstance()
 
     BOOL runNormal = THIS_CFG.GetInt("settings", "RunNormal", 0);
 
-    // 检查代理崩溃保护标志（只在代理模式下检查）
-    // 如果服务检测到代理连续崩溃，会设置此标志
-    {
-        CString cmdLineLower = cmdLine;
-        cmdLineLower.MakeLower();
-        BOOL isAgentMode = (cmdLineLower.Find(_T("-agent")) != -1);
-
-        if (isAgentMode && THIS_CFG.GetInt(CFG_CRASH_SECTION, CFG_CRASH_PROTECTED, 0) == 1) {
-            // 清除崩溃保护标志
-            THIS_CFG.SetInt(CFG_CRASH_SECTION, CFG_CRASH_PROTECTED, 0);
-            // 切换到正常模式
-            THIS_CFG.SetInt("settings", "RunNormal", 1);
-            runNormal = 1;
-            Mprintf("[InitInstance] 检测到代理崩溃保护标志，切换到正常运行模式。\n");
-            MessageBoxL("检测到代理程序连续崩溃，已自动切换到正常运行模式。\n\n"
-                        "如需重新启用服务模式，请在设置中手动切换。",
-                        "崩溃保护", MB_ICONWARNING);
-        }
+    // 检查代理崩溃保护标志
+    // 如果服务检测到代理连续崩溃，会设置此标志并停止服务
+    // 用户下次启动时（普通模式或代理模式）都会看到提示
+    if (THIS_CFG.GetInt(CFG_CRASH_SECTION, CFG_CRASH_PROTECTED, 0) == 1) {
+        // 清除崩溃保护标志
+        THIS_CFG.SetInt(CFG_CRASH_SECTION, CFG_CRASH_PROTECTED, 0);
+        // 确保是正常模式（服务端已设置，这里再次确保）
+        THIS_CFG.SetInt("settings", "RunNormal", 1);
+        runNormal = 1;
+        Mprintf("[InitInstance] 检测到代理崩溃保护标志，切换到正常运行模式。\n");
+        MessageBoxL("检测到代理程序连续崩溃，已自动切换到正常运行模式。\n\n"
+                    "如需重新启用服务模式，请在设置中手动切换。",
+                    "崩溃保护", MB_ICONWARNING);
     }
 
     char curFile[MAX_PATH] = { 0 };
     GetModuleFileNameA(NULL, curFile, MAX_PATH);
-    if (runNormal != 1 && !IsRunningAsAdmin() && LaunchAsAdmin(curFile, "runas")) {
+    // 代理模式由服务管理，不应再次请求管理员权限提升
+    // 否则会导致：1) 原进程正常退出(exitCode=0)不被视为崩溃 2) 被提升的进程脱离服务监控
+    BOOL isAgentMode = IsAgentMode();
+    if (runNormal != 1 && !isAgentMode && !IsRunningAsAdmin() && LaunchAsAdmin(curFile, "runas")) {
         Mprintf("[InitInstance] 程序没有管理员权限，用户选择以管理员身份重新运行。\n");
         return FALSE;
     }
@@ -619,14 +617,23 @@ int CMy2015RemoteApp::ExitInstance()
 
     SAFE_DELETE(m_iniFile);
 
-    Mprintf("[InitInstance] 主控程序退出运行。\n");
-    Sleep(500);
+    Mprintf("[ExitInstance] 主控程序退出运行。\n");
 
-    // 只有在代理模式退出时才停止服务
+    // 代理模式正常退出时，需要通知服务停止监控
     if (IsAgentMode()) {
-        Mprintf("[InitInstance] 主控程序为代理模式，停止服务。\n");
-        ServerService_Stop();
+        // 先尝试通过 SCM API 停止服务（需要管理员权限）
+        int ret = ServerService_Stop();
+        if (ret == 0) {
+            Mprintf("[ExitInstance] 代理模式，已通过 SCM 停止服务。\n");
+        } else {
+            // SCM 方式失败（可能是用户权限不足），使用 ExitProcess 确保退出代码正确
+            // 注意：不用 return，因为 MFC 对话框模式下返回值可能被忽略
+            Mprintf("[ExitInstance] 代理模式，SCM 失败(%d)，使用 ExitProcess(%d)。\n", ret, EXIT_MANUAL_STOP);
+            Sleep(500);
+            ExitProcess(EXIT_MANUAL_STOP);
+        }
     }
 
+    Sleep(500);
     return CWinApp::ExitInstance();
 }
