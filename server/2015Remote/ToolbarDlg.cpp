@@ -340,7 +340,7 @@ BOOL CToolbarDlg::OnInitDialog()
     m_btnQuality.SetIconDrawFunc(CIconButton::DrawIconQuality);
     m_btnRestoreConsole.SetIconDrawFunc(CIconButton::DrawIconRestoreConsole);
     m_btnX.SetIconDrawFunc(CIconButton::DrawIconLetterX);  // 切换窗口
-    m_btnY.SetIconDrawFunc(CIconButton::DrawIconLetterY);  // 预留按钮 Y
+    // Y按钮图标在 UpdateButtonIcons 中根据音频状态动态设置
     m_btnZ.SetIconDrawFunc(CIconButton::DrawIconLetterZ);  // 预留按钮 Z
     m_btnScreenshot.SetIconDrawFunc(CIconButton::DrawIconScreenshot);
     m_btnMinimize.SetIconDrawFunc(CIconButton::DrawIconMinimize);
@@ -364,7 +364,7 @@ BOOL CToolbarDlg::OnInitDialog()
     m_tooltip.AddTool(&m_btnQuality, _TR("屏幕质量"));
     m_tooltip.AddTool(&m_btnRestoreConsole, _TR("RDP会话归位"));
     m_tooltip.AddTool(&m_btnX, _TR("切换窗口"));  // 类似 Alt+Tab
-    m_tooltip.AddTool(&m_btnY, _T("Y"));  // 预留按钮
+    m_tooltip.AddTool(&m_btnY, pParent->m_Settings.AudioEnabled ? _TR("关闭系统音频") : _TR("打开系统音频"));
     m_tooltip.AddTool(&m_btnZ, _T("Z"));  // 预留按钮
     m_tooltip.AddTool(&m_btnScreenshot, _TR("截图"));
     m_tooltip.AddTool(&m_btnMinimize, _TR("最小化"));
@@ -492,6 +492,16 @@ void CToolbarDlg::UpdateButtonIcons()
         m_tooltip.UpdateTipText(_TR("显示状态信息"), &m_btnStatusInfo);
     }
     m_btnStatusInfo.Invalidate(FALSE);
+
+    // Audio button (Y)
+    if (pParent->m_Settings.AudioEnabled) {
+        m_btnY.SetIconDrawFunc(CIconButton::DrawIconAudioOn);
+        m_tooltip.UpdateTipText(_TR("关闭系统音频"), &m_btnY);
+    } else {
+        m_btnY.SetIconDrawFunc(CIconButton::DrawIconAudioOff);
+        m_tooltip.UpdateTipText(_TR("打开系统音频"), &m_btnY);
+    }
+    m_btnY.Invalidate(FALSE);
 }
 
 void CToolbarDlg::LayoutButtons()
@@ -725,7 +735,25 @@ void CToolbarDlg::OnBnClickedX()
 
 void CToolbarDlg::OnBnClickedY()
 {
-    // TODO: 预留按钮 Y 的响应函数
+    // 切换系统音频
+    CScreenSpyDlg* pParent = (CScreenSpyDlg*)GetParent();
+    if (pParent && pParent->m_ContextObject) {
+        // 切换音频状态
+        pParent->m_Settings.AudioEnabled = !pParent->m_Settings.AudioEnabled;
+        // 发送控制命令到客户端
+        pParent->SendAudioCtrl(pParent->m_Settings.AudioEnabled ? CYCLEAUDIO_ENABLE : CYCLEAUDIO_DISABLE, 1);
+        // 如果关闭音频，停止本地播放
+        if (!pParent->m_Settings.AudioEnabled) {
+            pParent->StopAudioPlayback();
+        }
+        // 更新系统菜单勾选状态
+        CMenu* SysMenu = pParent->GetSystemMenu(FALSE);
+        if (SysMenu) {
+            SysMenu->CheckMenuItem(IDM_AUDIO_TOGGLE, pParent->m_Settings.AudioEnabled ? MF_CHECKED : MF_UNCHECKED);
+        }
+        // 更新工具栏按钮图标
+        UpdateButtonIcons();
+    }
 }
 
 void CToolbarDlg::OnBnClickedZ()

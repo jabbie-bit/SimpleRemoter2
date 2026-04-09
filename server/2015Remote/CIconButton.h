@@ -45,6 +45,8 @@ public:
     static void DrawIconLetterX(CDC* pDC, const CRect& rc);  // 字母 X 图标
     static void DrawIconLetterY(CDC* pDC, const CRect& rc);  // 字母 Y 图标
     static void DrawIconLetterZ(CDC* pDC, const CRect& rc);  // 字母 Z 图标
+    static void DrawIconAudioOn(CDC* pDC, const CRect& rc);  // 音频开启图标 (喇叭+声波)
+    static void DrawIconAudioOff(CDC* pDC, const CRect& rc); // 音频关闭图标 (喇叭+斜线)
 
 protected:
     virtual void DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);

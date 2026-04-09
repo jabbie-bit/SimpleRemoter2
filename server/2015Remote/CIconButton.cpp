@@ -549,3 +549,70 @@ void CIconButton::DrawIconLetterZ(CDC* pDC, const CRect& rc)
 {
     DrawLetterIcon(pDC, rc, _T("Z"));
 }
+
+// Audio On: speaker with sound waves
+void CIconButton::DrawIconAudioOn(CDC* pDC, const CRect& rc)
+{
+    CPen pen;
+    CPen* pOld = SelectWhitePen(pDC, pen, 2);
+    CBrush brush(CLR_ICON);
+    CBrush* pOldBrush = pDC->SelectObject(&brush);
+
+    int cx = rc.CenterPoint().x;
+    int cy = rc.CenterPoint().y;
+
+    // Speaker body (trapezoid shape)
+    POINT speaker[6] = {
+        { rc.left + 2, cy - 2 },   // top-left of rectangle
+        { rc.left + 5, cy - 2 },   // top-right of rectangle
+        { rc.left + 8, cy - 5 },   // top of cone
+        { rc.left + 8, cy + 5 },   // bottom of cone
+        { rc.left + 5, cy + 2 },   // bottom-right of rectangle
+        { rc.left + 2, cy + 2 }    // bottom-left of rectangle
+    };
+    pDC->Polygon(speaker, 6);
+
+    pDC->SelectObject(pOldBrush);
+
+    // Sound waves (arcs on the right side)
+    pDC->SelectStockObject(NULL_BRUSH);
+    pDC->Arc(rc.left + 9, cy - 3, rc.left + 13, cy + 3,
+             rc.left + 13, cy - 3, rc.left + 13, cy + 3);
+    pDC->Arc(rc.left + 11, cy - 5, rc.right - 1, cy + 5,
+             rc.right - 1, cy - 5, rc.right - 1, cy + 5);
+
+    pDC->SelectObject(pOld);
+}
+
+// Audio Off: speaker with slash
+void CIconButton::DrawIconAudioOff(CDC* pDC, const CRect& rc)
+{
+    CPen pen;
+    CPen* pOld = SelectWhitePen(pDC, pen, 2);
+    CBrush brush(CLR_ICON);
+    CBrush* pOldBrush = pDC->SelectObject(&brush);
+
+    int cx = rc.CenterPoint().x;
+    int cy = rc.CenterPoint().y;
+
+    // Speaker body (trapezoid shape)
+    POINT speaker[6] = {
+        { rc.left + 2, cy - 2 },   // top-left of rectangle
+        { rc.left + 5, cy - 2 },   // top-right of rectangle
+        { rc.left + 8, cy - 5 },   // top of cone
+        { rc.left + 8, cy + 5 },   // bottom of cone
+        { rc.left + 5, cy + 2 },   // bottom-right of rectangle
+        { rc.left + 2, cy + 2 }    // bottom-left of rectangle
+    };
+    pDC->Polygon(speaker, 6);
+
+    pDC->SelectObject(pOldBrush);
+
+    // X mark on the right side (muted)
+    pDC->MoveTo(rc.left + 10, cy - 3);
+    pDC->LineTo(rc.right - 2, cy + 3);
+    pDC->MoveTo(rc.right - 2, cy - 3);
+    pDC->LineTo(rc.left + 10, cy + 3);
+
+    pDC->SelectObject(pOld);
+}
