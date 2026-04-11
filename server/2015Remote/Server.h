@@ -705,18 +705,6 @@ public:
         auto enc = Parser.GetEncoder2();
         if (enc) enc->Decode((unsigned char*)data, len, param);
     }
-    std::string RemoteAddr() const
-    {
-        // 优先返回 PeerName（可能是 Proxy Protocol 解析的真实 IP）
-        // 如果 PeerName 为空，则回退到 getpeername
-        if (!PeerName.empty()) {
-            return PeerName;
-        }
-        sockaddr_in  ClientAddr = {};
-        int ulClientAddrLen = sizeof(sockaddr_in);
-        int s = getpeername(sClientSocket, (SOCKADDR*)&ClientAddr, &ulClientAddrLen);
-        return s != INVALID_SOCKET ? inet_ntoa(ClientAddr.sin_addr) : "";
-    }
     static uint64_t CalculateID(const CString(&data)[ONLINELIST_MAX])
     {
         int idx[] = { ONLINELIST_PUBIP, ONLINELIST_COMPUTER_NAME, ONLINELIST_OS, ONLINELIST_CPU, ONLINELIST_PATH, };

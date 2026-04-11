@@ -10,6 +10,7 @@ setlocal enabledelayedexpansion
 ::   Phase 2: File Transfer
 ::   Phase 3: Network
 ::   Phase 4: Screen/Image
+::   Phase 5: Auth + Config
 
 set "SCRIPT_DIR=%~dp0"
 set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
@@ -32,7 +33,7 @@ goto help
 
 :build
 echo ========================================
-echo  Building Tests (14 executables)
+echo  Building Tests (17 executables)
 echo ========================================
 
 if not exist "%BUILD_DIR%\CMakeCache.txt" (
@@ -54,7 +55,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo Build successful! (14 test executables)
+echo Build successful! (17 test executables)
 echo.
 echo Phase 1 - Buffer/Protocol:
 echo   - client_buffer_test.exe (33 tests)
@@ -71,12 +72,17 @@ echo Phase 3 - Network:
 echo   - header_test.exe (29 tests)
 echo   - packet_fragment_test.exe (24 tests)
 echo   - http_mask_test.exe (27 tests)
+echo   - geolocation_test.exe (12 tests)
 echo.
 echo Phase 4 - Screen/Image:
 echo   - diff_algorithm_test.exe (32 tests)
 echo   - rgb565_test.exe (286 tests)
 echo   - scroll_detector_test.exe (43 tests)
 echo   - quality_adaptive_test.exe (64 tests)
+echo.
+echo Phase 5 - Auth/Config:
+echo   - date_verify_test.exe (18 tests)
+echo   - registry_config_test.exe (27 tests)
 exit /b 0
 
 :run
@@ -97,6 +103,7 @@ if "%OPTION%"=="protocol" goto run_protocol
 if "%OPTION%"=="file" goto run_file
 if "%OPTION%"=="network" goto run_network
 if "%OPTION%"=="screen" goto run_screen
+if "%OPTION%"=="auth" goto run_auth
 if "%OPTION%"=="verbose" goto run_verbose
 goto run_all
 
@@ -124,10 +131,11 @@ echo Running file transfer tests [127]...
 goto check_result
 
 :run_network
-echo Running network tests [80]...
+echo Running network tests [92]...
 "%BUILD_DIR%\%CONFIG%\header_test.exe" --gtest_color=yes
 "%BUILD_DIR%\%CONFIG%\packet_fragment_test.exe" --gtest_color=yes
 "%BUILD_DIR%\%CONFIG%\http_mask_test.exe" --gtest_color=yes
+"%BUILD_DIR%\%CONFIG%\geolocation_test.exe" --gtest_color=yes
 goto check_result
 
 :run_screen
@@ -136,6 +144,12 @@ echo Running screen/image tests [425]...
 "%BUILD_DIR%\%CONFIG%\rgb565_test.exe" --gtest_color=yes
 "%BUILD_DIR%\%CONFIG%\scroll_detector_test.exe" --gtest_color=yes
 "%BUILD_DIR%\%CONFIG%\quality_adaptive_test.exe" --gtest_color=yes
+goto check_result
+
+:run_auth
+echo Running auth/config tests [45]...
+"%BUILD_DIR%\%CONFIG%\date_verify_test.exe" --gtest_color=yes
+"%BUILD_DIR%\%CONFIG%\registry_config_test.exe" --gtest_color=yes
 goto check_result
 
 :run_verbose
@@ -189,14 +203,15 @@ echo.
 echo Usage: test.bat ^<command^> [options]
 echo.
 echo Commands:
-echo   build           Build all 14 test executables
+echo   build           Build all 17 test executables
 echo   run             Run all tests
 echo   run client      Run client Buffer tests
 echo   run server      Run server Buffer tests
 echo   run protocol    Run protocol tests
 echo   run file        Run file transfer tests
-echo   run network     Run network tests
+echo   run network     Run network tests (incl. geolocation)
 echo   run screen      Run screen/image tests
+echo   run auth        Run auth/config tests
 echo   run verbose     Run all tests with verbose output
 echo   clean           Clean build directory
 echo   rebuild         Clean and rebuild
@@ -207,11 +222,13 @@ echo   Phase 1: Buffer + Protocol
 echo   Phase 2: File Transfer
 echo   Phase 3: Network
 echo   Phase 4: Screen/Image
+echo   Phase 5: Auth + Config
 echo.
 echo Examples:
 echo   test.bat build          # Build all tests
-echo   test.bat run            # Run all 763 tests
+echo   test.bat run            # Run all 820 tests
 echo   test.bat run screen     # Run Phase 4 screen tests
+echo   test.bat run auth       # Run Phase 5 auth/config tests
 echo   test.bat rebuild        # Clean and rebuild
 echo.
 goto end

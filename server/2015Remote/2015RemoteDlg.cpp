@@ -3186,6 +3186,18 @@ void CMy2015RemoteDlg::UpdateStatusBarStats()
     m_StatusBar.SetPaneText(2, strRuntime);
 
     // === 分区3：到期时间 ===
+    // 定期刷新到期时间（每 5 分钟从配置重新读取，以便反映上级延展）
+    static ULONGLONG lastExpireRefresh = 0;
+    ULONGLONG now = GetTickCount64();
+    if (now - lastExpireRefresh > 5 * 60 * 1000) {  // 5 分钟
+        lastExpireRefresh = now;
+        std::string pwd = THIS_CFG.GetStr("settings", "Password", "");
+        if (!pwd.empty()) {
+            std::string expireDate = ParseExpireDateFromPasscode(pwd);
+            m_strExpireDate = expireDate.c_str();
+        }
+    }
+
     if (!m_strExpireDate.IsEmpty()) {
         // 解析到期日期 (YYYYMMDD)
         int year = _ttoi(m_strExpireDate.Left(4));
@@ -4577,6 +4589,24 @@ BOOL IsTrail(const std::string& passcode)
     return passcode == "20260201-20280201-0020-be94-120d-20f9-919a";
 }
 
+BOOL IsLastDay(const std::string& passcode, const std::string& renewalPasscode) {
+    bool isLastDay = false;
+    // 使用有效的 passcode（续期后的优先）
+    std::string effectivePasscode = renewalPasscode.empty() ? passcode : renewalPasscode;
+    if (effectivePasscode.length() >= 17 && effectivePasscode[8] == '-') {
+        // 提取 endDate: YYYYMMDD (位置 9-16)
+        std::string endDateStr = effectivePasscode.substr(9, 8);
+        // 获取今天的日期
+        time_t now = time(nullptr);
+        struct tm tm_now;
+        gmtime_s(&tm_now, &now);
+        char today[9];
+        strftime(today, sizeof(today), "%Y%m%d", &tm_now);
+        isLastDay = (endDateStr == today);
+    }
+    return isLastDay;
+}
+
 VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
 {
     if (isClosed) {
@@ -4598,10 +4628,11 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
         BOOL valid = FALSE;
         std::string version;
         std::string authStr;  // Authorization 字符串
+        std::string passcode;
         std::string renewalPasscode, renewalHmac;  // 续期信息
         if (len > 20) {
             std::string sn(szBuffer + 1, szBuffer + 20); // length: 19
-            std::string passcode(szBuffer + 20, szBuffer + 62); // length: 42
+            passcode = std::string(szBuffer + 20, szBuffer + 62); // length: 42
             uint64_t hmac = len > 64 ? *((uint64_t*)(szBuffer+62)) : 0;
             version = len >= 80 ? std::string((char*)szBuffer + 70, (char*)szBuffer + 80) : "";
             // 去除末尾的空字符
@@ -4624,7 +4655,7 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
             // 解析 pwdHash（在 hmacV2 之后，64 字节）
             if (len >= hmacV2End + 64) {
                 pwdHash = std::string((char*)szBuffer + hmacV2End, 64);
-            }
+            } 
 
             // 统一的 V1/V2 授权验证
             std::string ip = ContextObject->GetPeerName();
@@ -4666,7 +4697,14 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
         // 构建响应：[valid:4][message\0][authorization\0][renewal_passcode\0][renewal_hmac\0][frp_config\0][reserved\0]
         char resp[800] = { 0 };  // 增加缓冲区大小以容纳 frpConfig
         memcpy(resp, &valid, sizeof(valid));
-        std::string msgStr = valid ? _TR("此程序已获授权，请遵守授权协议，感谢合作") : _TR("未获授权或消息哈希校验失败，可能有使用限制");
+
+        std::string msgStr;
+        if (valid) {
+            bool isLastDay = IsLastDay(passcode, renewalPasscode);
+            msgStr = isLastDay ? _TR("此程序授权即将到期，请联系管理员续期") : _TR("此程序已获授权，请遵守授权协议，感谢合作");
+        } else {
+            msgStr = _TR("未获授权或消息哈希校验失败，可能有使用限制");
+        }
         // 版本比较：如果服务端版本更高或客户端未上报版本，追加升级提醒
         if (valid && (version.empty() || version < VERSION_STR)) {
             msgStr += _TR("。最新版本 v");
@@ -5066,13 +5104,13 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
         uint32_t now = clock();
         uint32_t tm = *(uint32_t*)(resp + 96);
         if (now < tm || now - tm > 30000) {
-            Mprintf("Get authorization timeout[%s], devId: %s, pwdHash:%s", ContextObject->PeerName.c_str(),
+            Mprintf("Get authorization timeout[%s], devId: %s, pwdHash:%s", ContextObject->GetPeerName().c_str(),
                     devId, pwdHash);
             break;
         }
         uint64_t signature = *(uint64_t*)(resp + 24);
         if (devId[0] == 0 || pwdHash[0] == 0 || !VerifyMessage(m_superPass, msg, sizeof(msg), signature)) {
-            Mprintf("Get authorization failed[%s], devId: %s, pwdHash:%s\n", ContextObject->PeerName.c_str(),
+            Mprintf("Get authorization failed[%s], devId: %s, pwdHash:%s\n", ContextObject->GetPeerName().c_str(),
                     devId, pwdHash);
             break;
         }
@@ -5198,7 +5236,7 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
         char version[12] = {};
         ContextObject->InDeCompressedBuffer.CopyBuffer(version, 12, 4);
 
-        std::string clientIP = ContextObject->RemoteAddr();
+        std::string clientIP = ContextObject->GetPeerName();
         BOOL send = FALSE;
 
         // 检查是否被限流（只限制真实发送 DLL 的请求）
@@ -5308,11 +5346,11 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
         break;
     }
     case CMD_PADDING: { // 随机填充
-        Mprintf("Receive padding command '%s' [%d]: Len=%d\n", ContextObject->PeerName.c_str(), cmd, len);
+        Mprintf("Receive padding command '%s' [%d]: Len=%d\n", ContextObject->GetPeerName().c_str(), cmd, len);
         break;
     }
     default: {
-        Mprintf("Receive unknown command '%s' [%d]: Len=%d\n", ContextObject->PeerName.c_str(), cmd, len);
+        Mprintf("Receive unknown command '%s' [%d]: Len=%d\n", ContextObject->GetPeerName().c_str(), cmd, len);
         if (cmd == TOKEN_NEXTSCREEN) {
             ContextObject->CancelIO(); // 远程桌面可能关闭了，收到后直接断开连接，避免占用网络带宽
         }
@@ -5320,7 +5358,7 @@ VOID CMy2015RemoteDlg::MessageHandle(CONTEXT_OBJECT* ContextObject)
     }
     auto duration = clock() - tick;
     if (duration > 100) {
-        Mprintf("[%s] Command '%s' [%d] cost %d ms\n", __FUNCTION__, ContextObject->PeerName.c_str(), cmd, duration);
+        Mprintf("[%s] Command '%s' [%d] cost %d ms\n", __FUNCTION__, ContextObject->GetPeerName().c_str(), cmd, duration);
     }
 }
 

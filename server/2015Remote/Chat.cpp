@@ -47,7 +47,7 @@ BOOL CChat::OnInitDialog()
     __super::OnInitDialog();
 
     CString str;
-    str.FormatL(_T("远程交谈 - %s"), m_ContextObject->PeerName.c_str()),
+    str.FormatL(_T("远程交谈 - %s"), m_ContextObject->GetPeerName().c_str()),
                 SetWindowText(str);
 
     // 设置控件文本（解决英语系统乱码问题）

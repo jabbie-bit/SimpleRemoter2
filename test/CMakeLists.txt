@@ -346,10 +346,27 @@ if(WIN32)
     target_compile_definitions(geolocation_test PRIVATE _WIN32)
 endif()
 
+# ============================================
+# 注册表配置测试 (iniFile/binFile)
+# ============================================
+if(WIN32)
+    add_executable(registry_config_test
+        unit/config/RegistryConfigTest.cpp
+    )
+
+    target_link_libraries(registry_config_test
+        GTest::gtest_main
+        advapi32
+    )
+
+    target_compile_definitions(registry_config_test PRIVATE _WIN32)
+endif()
+
 # 注册测试
 include(GoogleTest)
 if(WIN32)
     gtest_discover_tests(geolocation_test)
+    gtest_discover_tests(registry_config_test)
 endif()
 gtest_discover_tests(client_buffer_test)
 gtest_discover_tests(server_buffer_test)

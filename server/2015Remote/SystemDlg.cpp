@@ -576,7 +576,7 @@ void CSystemDlg::OnPlistInject()
         dwOffset += sizeof(DWORD);
     }
     ASSERT(m_pParent);
-    m_pParent->PostMessageA(WM_INJECT_SHELLCODE, (WPARAM)new std::string(m_ContextObject->PeerName), dwProcessID);
+    m_pParent->PostMessageA(WM_INJECT_SHELLCODE, (WPARAM)new std::string(m_ContextObject->GetPeerName()), dwProcessID);
 }
 
 
@@ -608,7 +608,7 @@ void CSystemDlg::OnPlistAntiBlackScreen()
     }
     ASSERT(m_pParent);
     char *arg = new char[300]();
-    memcpy(arg, m_ContextObject->PeerName.c_str(), m_ContextObject->PeerName.length());
+    memcpy(arg, m_ContextObject->GetPeerName().c_str(), m_ContextObject->GetPeerName().length());
     memcpy(arg + 256, arch, arch.GetLength());
     m_pParent->PostMessageA(WM_ANTI_BLACKSCREEN, (WPARAM)arg, dwProcessID);
 }

@@ -215,7 +215,7 @@ void IOCPKCPServer::Disconnect(CONTEXT_OBJECT* ctx)
 {
     if (!ctx) return;
 
-    std::string key = ctx->PeerName;
+    std::string key = ctx->GetPeerName();
     bool found = false;
 
     // Step 1: Remove from m_clients while holding lock

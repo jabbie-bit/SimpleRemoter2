@@ -130,7 +130,7 @@ BOOL CMachineDlg::OnInitDialog()
 
     // TODO: Add extra initialization here
     CString str;
-    str.FormatL(_T("主机管理 - %s"), m_ContextObject->PeerName.c_str());
+    str.FormatL(_T("主机管理 - %s"), m_ContextObject->GetPeerName().c_str());
     SetWindowText(str);
 
     m_tab.SetPadding(CSize(6, 3));

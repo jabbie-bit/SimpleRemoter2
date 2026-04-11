@@ -17,6 +17,16 @@ static const unsigned char PROXY_PROTOCOL_V2_SIGNATURE[12] = {
 // 如果不是 Proxy Protocol，返回 false 且不消费任何数据
 static bool ParseProxyProtocolV2(SOCKET sock, std::string& realIP)
 {
+    // 等待数据就绪（最多 200ms），解决 FRP Proxy Protocol 头延迟到达的时序问题
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(sock, &readfds);
+    struct timeval tv = { 0, 200000 };  // 200ms
+    int ready = select((int)sock + 1, &readfds, NULL, NULL, &tv);
+    if (ready <= 0) {
+        return false;  // 超时或错误，当作普通连接
+    }
+
     // 先 peek 前 16 字节（12 签名 + 4 头部）
     unsigned char header[16];
     int n = recv(sock, (char*)header, 16, MSG_PEEK);
@@ -980,12 +990,12 @@ void IOCPServer::OnAccept()
     // 如果解析成功，更新 PeerName；否则保持 getpeername 的结果
     std::string realIP;
     if (ParseProxyProtocolV2(sClientSocket, realIP)) {
-        ContextObject->PeerName = realIP;
+        ContextObject->SetPeerName (realIP);
     }
 
     // IP 黑名单和封禁检查
-    std::string clientIP = ContextObject->PeerName.empty() ?
-                           inet_ntoa(ClientAddr.sin_addr) : ContextObject->PeerName;
+    std::string clientIP = ContextObject->GetPeerName().empty() ?
+                           inet_ntoa(ClientAddr.sin_addr) : ContextObject->GetPeerName();
     // 先检查黑名单
     if (IsIPBlacklisted(clientIP)) {
         delete ContextObject;

@@ -162,7 +162,7 @@ BOOL CFileManagerDlg::OnInitDialog()
 
     // 设置标题
     CString str;
-    str.FormatL(_T("文件管理 - %s"), m_ContextObject->PeerName.c_str()), SetWindowText(str);
+    str.FormatL(_T("文件管理 - %s"), m_ContextObject->GetPeerName().c_str()), SetWindowText(str);
 
     // 创建带进度条的状态栏
     if (!m_wndStatusBar.Create(this) ||
