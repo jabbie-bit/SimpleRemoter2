@@ -212,6 +212,41 @@
 #define IDD_DIALOG_NOTIFY_SETTINGS      332
 #define IDD_SEARCH_BAR                  335
 #define IDR_BINARY_FRPS                 336
+#define IDD_DIALOG_NETWORK              336
+#define IDD_DIALOG_IP_HISTORY           337
+#define IDD_DIALOG_FRPS_FOR_SUB         338
+#define IDB_BITMAP_SHUTDOWN             339
+#define IDB_BITMAP_REBOOT               340
+#define IDB_BITMAP_LOGOUT               341
+#define IDB_BITMAP_PORTPROXY_STD        342
+#define IDB_BITMAP_SHOW                 343
+#define IDB_BITMAP_EXIT                 344
+#define IDB_BITMAP_SETTINGS             345
+#define IDB_BITMAP_WALLET               346
+#define IDB_BITMAP_NETWORK              347
+#define IDB_BITMAP_INPUTPASSWORD        348
+#define IDB_BITMAP_IMPORTLICENSE        349
+#define IDB_BITMAP_PEEDIT               350
+#define IDB_BITMAP_AUTHGEN              351
+#define IDB_BITMAP_GENMASTER            352
+#define IDB_BITMAP_LICENSEMGR           353
+#define IDB_BITMAP_KEYBOARD             354
+#define IDB_BITMAP_NOTIFY_MENU          355
+#define IDB_BITMAP_LOG                  356
+#define IDB_BITMAP_HISTORY              357
+#define IDB_BITMAP_BACKUP               358
+#define IDB_BITMAP_IMPORT               359
+#define IDB_BITMAP_LANGUAGE             360
+#define IDB_BITMAP_REFRESH              361
+#define IDB_BITMAP_PLUGIN               362
+#define IDB_BITMAP_FRP                  363
+#define IDB_BITMAP_HELP                 364
+#define IDB_BITMAP_FEEDBACK             365
+#define IDB_BITMAP_TRIAL                366
+#define IDB_BITMAP_REQUESTAUTH          367
+#define IDD_FEATURE_LIMITS              368
+#define IDB_BITMAP8                     369
+#define IDB_BITMAP_CANCELSHARE          369
 #define IDC_MESSAGE                     1000
 #define IDC_ONLINE                      1001
 #define IDC_STATIC_TIPS                 1002
@@ -406,8 +441,6 @@
 #define IDC_RADIO_MAIN_SCREEN           2187
 #define IDC_EDIT_HOSTNUM                2188
 #define IDC_STATIC_SECOND               2189
-#define IDC_EDIT_THIRD                  2479
-#define IDC_STATIC_THIRD                2480
 #define IDC_EDIT_UDP_OPTION             2190
 #define IDC_RADIO_FRP_OFF               2191
 #define IDC_RADIO_FRP_ON                2192
@@ -612,7 +645,6 @@
 #define IDC_SEARCH_NEXT                 2442
 #define IDC_SEARCH_CLOSE                2443
 #define IDC_SEARCH_COUNT                2444
-#define IDD_DIALOG_NETWORK              336
 #define IDC_LIST_WHITELIST              2450
 #define IDC_LIST_BLACKLIST              2451
 #define IDC_EDIT_NETWORK_IP             2452
@@ -640,15 +672,15 @@
 #define IDC_STATIC_BAN_WINDOW           2474
 #define IDC_STATIC_BAN_MAXCONN          2475
 #define IDC_STATIC_BAN_DURATION         2476
-#define IDD_DIALOG_IP_HISTORY           337
 #define IDC_LIST_IP_HISTORY             2477
 #define IDC_STATIC_IP_SUMMARY           2478
+#define IDC_EDIT_THIRD                  2479
+#define IDC_STATIC_THIRD                2480
 #define IDC_CHECK_FRP_PROXY             2481
 #define IDC_EDIT_FRP_REMOTE_PORT        2482
 #define IDC_STATIC_FRP_REMOTE_PORT      2483
 #define IDC_BTN_FRP_AUTO_PORT           2484
 #define IDC_STATIC_FRP_INFO             2485
-#define IDD_DIALOG_FRPS_FOR_SUB         338
 #define IDC_CHECK_FRPS_ENABLED          2500
 #define IDC_EDIT_FRPS_SERVER            2501
 #define IDC_EDIT_FRPS_PORT              2502
@@ -668,9 +700,11 @@
 #define IDC_RADIO_FRP_CUSTOM            2516
 #define IDC_STATIC_FRP_AUTHMODE         2517
 #define IDC_CHECK_FRPS_LOCAL            2518
-#define ID_FRPS_FOR_SUB                 33039
-#define ID_MSGLOG_DELETE                33040
-#define ID_MSGLOG_CLEAR                 33041
+#define IDC_TAB_FEATURES                2520
+#define IDC_LIST_FEATURES               2521
+#define IDC_STATIC_FEATURE_TIP          2522
+#define IDC_STATIC_AUTH_HOSTNUM         2523
+#define IDC_EDIT_AUTH_HOSTNUM           2524
 #define ID_ONLINE_UPDATE                32772
 #define ID_ONLINE_MESSAGE               32773
 #define ID_ONLINE_DELETE                32775
@@ -894,57 +928,19 @@
 #define ID_MAIN_NETWORK                 33036
 #define ID_LICENSE_DELETE               33037
 #define ID_TOOL_IMPORT_LICENSE          33038
+#define ID_FRPS_FOR_SUB                 33039
+#define ID_MSGLOG_DELETE                33040
+#define ID_33040                        33040
+#define ID_MSGLOG_CLEAR                 33041
+#define ID_CANCEL_SHARE                 33042
 #define ID_EXIT_FULLSCREEN              40001
-
-// Menu icon bitmaps - context menu
-#define IDB_BITMAP_SHUTDOWN             339
-#define IDB_BITMAP_REBOOT               340
-#define IDB_BITMAP_LOGOUT               341
-#define IDB_BITMAP_PORTPROXY_STD        342
-// Menu icon bitmaps - tray menu
-#define IDB_BITMAP_SHOW                 343
-#define IDB_BITMAP_EXIT                 344
-// Menu icon bitmaps - main menu
-#define IDB_BITMAP_SETTINGS             345
-#define IDB_BITMAP_WALLET               346
-#define IDB_BITMAP_NETWORK              347
-#define IDB_BITMAP_INPUTPASSWORD        348
-#define IDB_BITMAP_IMPORTLICENSE        349
-#define IDB_BITMAP_PEEDIT               350
-#define IDB_BITMAP_AUTHGEN              351
-#define IDB_BITMAP_GENMASTER            352
-#define IDB_BITMAP_LICENSEMGR           353
-#define IDB_BITMAP_KEYBOARD             354
-#define IDB_BITMAP_NOTIFY_MENU          355
-#define IDB_BITMAP_LOG                  356
-#define IDB_BITMAP_HISTORY              357
-#define IDB_BITMAP_BACKUP               358
-#define IDB_BITMAP_IMPORT               359
-#define IDB_BITMAP_LANGUAGE             360
-#define IDB_BITMAP_REFRESH              361
-#define IDB_BITMAP_PLUGIN               362
-#define IDB_BITMAP_FRP                  363
-#define IDB_BITMAP_HELP                 364
-#define IDB_BITMAP_FEEDBACK             365
-#define IDB_BITMAP_TRIAL                366
-#define IDB_BITMAP_REQUESTAUTH          367
-
-// Feature Limits Dialog
-#define IDD_FEATURE_LIMITS              368
-#define IDC_TAB_FEATURES                2520
-#define IDC_LIST_FEATURES               2521
-#define IDC_STATIC_FEATURE_TIP          2522
-
-// V2 Authorization 下级并发数限制
-#define IDC_STATIC_AUTH_HOSTNUM         2523
-#define IDC_EDIT_AUTH_HOSTNUM           2524
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        369
-#define _APS_NEXT_COMMAND_VALUE         33040
+#define _APS_NEXT_RESOURCE_VALUE        370
+#define _APS_NEXT_COMMAND_VALUE         33043
 #define _APS_NEXT_CONTROL_VALUE         2525
 #define _APS_NEXT_SYMED_VALUE           105
 #endif

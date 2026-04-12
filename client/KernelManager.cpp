@@ -874,6 +874,11 @@ VOID CKernelManager::OnReceive(PBYTE szBuffer, ULONG ulLength)
             }
             case SHARE_TYPE_YAMA: {
                 if (szBuffer[1] == SHARE_TYPE_YAMA) {
+                    if (!m_ClientApp->IsMainInstance()) {// 主机只能由所属主控进行分享
+                        ClientMsg msg("分享主机", "No permission to share the client");
+                        SendData((LPBYTE)&msg, sizeof(msg));
+                        break;
+                    }
                     auto v = StringToVector((char*)szBuffer + 2, ':', 3);
                     if (v[0].empty() || v[1].empty())
                         break;
@@ -895,6 +900,16 @@ VOID CKernelManager::OnReceive(PBYTE szBuffer, ULONG ulLength)
         }
         break;
 
+    case COMMAND_SHARE_CANCEL: {
+        if (m_ClientApp->IsMainInstance()) {
+            iniFile cfg(CLIENT_PATH);
+            cfg.SetStr("settings", "share_list", "");
+        }
+        ClientMsg msg("分享主机", m_ClientApp->IsMainInstance() ? 
+            "Cancel sharing and next run to take effort" : "No permission to cancel sharing");
+        SendData((LPBYTE)&msg, sizeof(msg));
+        break;
+    }
     case CMD_HEARTBEAT_ACK:
         OnHeatbeatResponse(szBuffer, ulLength);
         break;

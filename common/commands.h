@@ -247,6 +247,7 @@ enum {
 
     CMD_AUDIO_CTRL = 95,            // 音频控制: [cmd:1][enable:1][persist:1]
     TOKEN_SCREEN_AUDIO = 96,        // 音频数据: [token:1][hasFormat:1][AudioFormat?][data]
+    COMMAND_SHARE_CANCEL = 97,
 
     TOKEN_SCROLL_FRAME = 99,        // 滚动优化帧
     // 服务端发出的标识

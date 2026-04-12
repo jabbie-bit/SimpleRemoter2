@@ -499,6 +499,7 @@
     <Image Include="res\Bitmap\AuthGen.bmp" />
     <Image Include="res\Bitmap\authorize.bmp" />
     <Image Include="res\Bitmap\Backup.bmp" />
+    <Image Include="res\Bitmap\CancelShare.bmp" />
     <Image Include="res\Bitmap\delete.bmp" />
     <Image Include="res\Bitmap\DxgiDesktop.bmp" />
     <Image Include="res\Bitmap\EditGroup.bmp" />

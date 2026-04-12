@@ -581,6 +581,7 @@ CMy2015RemoteDlg::CMy2015RemoteDlg(CWnd* pParent): CDialogLangEx(CMy2015RemoteDl
     m_bmOnline[47].LoadBitmap(IDB_BITMAP_FEEDBACK);
     m_bmOnline[48].LoadBitmap(IDB_BITMAP_TRIAL);
     m_bmOnline[49].LoadBitmap(IDB_BITMAP_REQUESTAUTH);
+    m_bmOnline[50].LoadBitmap(IDB_BITMAP_CANCELSHARE);
 
     for (int i = 0; i < PAYLOAD_MAXTYPE; i++) {
         m_ServerDLL[i] = nullptr;
@@ -846,6 +847,7 @@ BEGIN_MESSAGE_MAP(CMy2015RemoteDlg, CDialogEx)
         ON_COMMAND(ID_EXECUTE_GHOST, &CMy2015RemoteDlg::OnExecuteGhost)
         ON_COMMAND(ID_MASTER_TRAIL, &CMy2015RemoteDlg::OnMasterTrail)
         ON_COMMAND(ID_FRPS_FOR_SUB, &CMy2015RemoteDlg::OnFrpsForSub)
+        ON_COMMAND(ID_CANCEL_SHARE, &CMy2015RemoteDlg::OnCancelShare)
         END_MESSAGE_MAP()
 
 
@@ -3481,6 +3483,7 @@ void CMy2015RemoteDlg::OnNMRClickOnline(NMHDR *pNMHDR, LRESULT *pResult)
     Menu.SetMenuItemBitmaps(ID_MACHINE_REBOOT, MF_BYCOMMAND, &m_bmOnline[22], &m_bmOnline[22]);
     Menu.SetMenuItemBitmaps(ID_MACHINE_LOGOUT, MF_BYCOMMAND, &m_bmOnline[23], &m_bmOnline[23]);
     Menu.SetMenuItemBitmaps(ID_PROXY_PORT_STD, MF_BYCOMMAND, &m_bmOnline[24], &m_bmOnline[24]);
+    Menu.SetMenuItemBitmaps(ID_CANCEL_SHARE, MF_BYCOMMAND, &m_bmOnline[50], &m_bmOnline[50]);
 
     Menu.ModifyMenuL(ID_ONLINE_AUTHORIZE, MF_BYCOMMAND | MF_STRING, ID_ONLINE_AUTHORIZE, _T("发送授权"));
 
@@ -9127,4 +9130,13 @@ void CMy2015RemoteDlg::OnMasterTrail()
     THIS_CFG.SetStr("settings", "SN", getDeviceID("127.0.0.1"));
     MessageBoxL("设置成功，仅限本地使用！试用版本会与授权服务联网验证！\n如需离线使用，需要正式授权。",
         "警告", MB_ICONINFORMATION);
+}
+
+void CMy2015RemoteDlg::OnCancelShare()
+{
+    if(IDYES != MessageBoxL("确定取消分享主机? 将撤销全部的分享链接。", "提示", MB_YESNO | MB_ICONQUESTION))
+        return;
+
+    BYTE bToken[100] = { COMMAND_SHARE_CANCEL };
+    SendSelectedCommand(bToken, sizeof(bToken));
 }

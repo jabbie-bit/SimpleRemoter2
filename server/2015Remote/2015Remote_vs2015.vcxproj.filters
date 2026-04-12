@@ -257,6 +257,7 @@
     <Image Include="res\Bitmap\Feedback.bmp" />
     <Image Include="res\Bitmap\Trial.bmp" />
     <Image Include="res\Bitmap\RequestAuth.bmp" />
+    <Image Include="res\Bitmap\CancelShare.bmp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\Release\ghost.exe" />
