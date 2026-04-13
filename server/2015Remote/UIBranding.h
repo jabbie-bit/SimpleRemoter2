@@ -265,7 +265,7 @@
 //
 
 // 反馈链接（帮助菜单 → 反馈）
-#define BRAND_URL_FEEDBACK      "https://github.com/yuanyuanxiang/SimpleRemoter/issues/new"
+#define BRAND_URL_FEEDBACK      "https://t.me/SimpleRemoter"
 
 // 帮助文档链接（帮助菜单 → 什么是这个）
 #define BRAND_URL_WIKI          "https://github.com/yuanyuanxiang/SimpleRemoter/wiki"

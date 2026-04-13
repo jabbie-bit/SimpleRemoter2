@@ -799,6 +799,7 @@ BOOL CPwdGenDlg::OnInitDialog()
     SetDlgItemText(IDC_STATIC_AUTH_HOSTNUM, _TR("下级连接数:"));
     SetDlgItemText(IDC_STATIC_KEYGEN_TOKEN, _TR("口  令:"));
     SetDlgItemText(IDC_STATIC_KEYGEN_HMAC_2373, _TR("HMAC:"));
+    SetDlgItemText(IDC_BUTTON_GENKEY, _TR("生成"));
     GetDlgItem(IDC_STATIC_KEYGEN_VERSION)->EnableWindow(GetUpperHash() == GetPwdHash());
 
     // TODO:  在此添加额外的初始化
