@@ -23,6 +23,9 @@
 #include "UIBranding.h"
 #pragma comment(lib, "Dbghelp.lib")
 
+// 外部声明：程序退出标志（定义在 2015RemoteDlg.cpp）
+extern std::atomic<bool> g_bAppExiting;
+
 // Check if CPU supports AVX2 instruction set
 static BOOL IsAVX2Supported()
 {
@@ -71,6 +74,11 @@ std::string GetMasterHash()
 */
 long WINAPI whenbuged(_EXCEPTION_POINTERS *excp)
 {
+    // 如果程序正在退出，静默退出，返回码 0（避免服务重启）
+    if (g_bAppExiting) {
+        ExitProcess(0);
+    }
+
     // 获取dump文件夹，若不存在，则创建之
     char dumpDir[_MAX_PATH];
     char dumpFile[_MAX_PATH + 64];

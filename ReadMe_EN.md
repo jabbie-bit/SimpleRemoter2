@@ -478,6 +478,26 @@ make
 
 ## Changelog
 
+### v1.3.1 (2026.4.15)
+
+**Web Remote Desktop & Multi-Master Sharing Enhancement**
+
+**New Features:**
+- Web Remote Desktop: WebSocket-based implementation, access remote desktop via mobile/tablet browser ([Configuration Guide](./docs/WebHTTPS.md))
+- Revoke sharing menu: Support revoking clients shared to other masters
+- Toolbar audio control: Added system audio toggle icon to remote desktop toolbar
+
+**Improvements:**
+- Disable adaptive quality for multi-monitor: Auto-disable when client has multiple monitors
+- Status bar auto-refresh expiration date: Immediate refresh after license renewal
+- Reduce invalid offline logs: Less logging when client not in host list
+- Multi-layer authorization auto-update: Layer-2+ master authorizations sync automatically
+- Enhanced usage tips: Added more operation hints for better UX
+- DLL cache reuse: Save DLL to registry for reuse on next startup
+
+**Bug Fixes:**
+- Fixed keylogger may not work properly while sharing client to other master
+
 ### v1.3.0 (2026.4.8)
 
 **Multi-Tier FRP Architecture & UI Branding**

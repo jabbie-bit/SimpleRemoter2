@@ -13,6 +13,7 @@
 #include <thread>
 #include <functional>
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <fstream>
 #include <filesystem>
@@ -23,6 +24,9 @@
 namespace ws {
 
 namespace fs = std::filesystem;
+
+// Static shutdown flag - survives Server destruction, safe for detached threads
+static std::atomic<bool> s_serverShuttingDown{false};
 
 // HTTP Response structure for enhanced HTTP handling
 struct HttpResponse {
@@ -196,7 +200,7 @@ public:
     using ConnectHandler = std::function<void(std::shared_ptr<Connection>)>;
     using DisconnectHandler = std::function<void(std::shared_ptr<Connection>)>;
 
-    Server() : m_listenSocket(INVALID_SOCKET), m_running(false) {}
+    Server() : m_listenSocket(INVALID_SOCKET), m_running(false), m_activeThreads(0) {}
     ~Server() { stop(); }
 
     void onMessage(MessageHandler handler) { m_onMessage = handler; }
@@ -251,30 +255,46 @@ public:
     void stop() {
         if (!m_running) return;
         m_running = false;
+        s_serverShuttingDown = true;  // Static flag survives Server destruction
 
-        // Clear callbacks first to prevent access after stop
-        m_onConnect = nullptr;
-        m_onDisconnect = nullptr;
-        m_onMessage = nullptr;
-        m_onBinary = nullptr;
-
+        // Close listen socket first to stop accepting new connections
         closesocket(m_listenSocket);
 
         if (m_acceptThread.joinable()) {
             m_acceptThread.join();
         }
 
-        // Close all connections
+        // Close all connections (this will cause handleClient loops to exit)
         {
             std::lock_guard<std::mutex> lock(m_connectionsMutex);
             for (auto& conn : m_connections) {
                 conn->close();
             }
-            m_connections.clear();
         }
 
-        // Give detached threads time to exit
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Wait for all handleClient threads to exit (max 5 seconds)
+        {
+            std::unique_lock<std::mutex> lock(m_threadCountMutex);
+            bool allExited = m_threadCountCV.wait_for(lock, std::chrono::seconds(5), [this]() {
+                return m_activeThreads == 0;
+            });
+            if (!allExited) {
+                // Threads didn't exit in time - they will exit on next recv() timeout
+                // Log warning but continue shutdown (don't block forever)
+                OutputDebugStringA("[WebSocket] Warning: Some threads still active after timeout\n");
+            }
+        }
+
+        // Now safe to clear callbacks after threads have exited
+        {
+            std::lock_guard<std::mutex> lock(m_connectionsMutex);
+            m_connections.clear();
+        }
+        m_httpHandler = nullptr;
+        m_onConnect = nullptr;
+        m_onDisconnect = nullptr;
+        m_onMessage = nullptr;
+        m_onBinary = nullptr;
 
         WSACleanup();
     }
@@ -388,6 +408,32 @@ private:
     }
 
     void handleClient(SOCKET sock, std::string clientIP) {
+        // Check if already shutting down before starting
+        if (s_serverShuttingDown) {
+            closesocket(sock);
+            return;
+        }
+
+        // Increment active thread count
+        {
+            std::lock_guard<std::mutex> lock(m_threadCountMutex);
+            m_activeThreads++;
+        }
+
+        // RAII guard to decrement thread count on exit
+        // Note: Must check static flag to avoid accessing destroyed Server
+        struct ThreadGuard {
+            Server* server;
+            ~ThreadGuard() {
+                // Only access server members if not shutting down
+                if (!s_serverShuttingDown) {
+                    std::lock_guard<std::mutex> lock(server->m_threadCountMutex);
+                    server->m_activeThreads--;
+                    server->m_threadCountCV.notify_all();
+                }
+            }
+        } guard{this};
+
         // Check for Proxy Protocol v2 header
         parseProxyProtocolV2(sock, clientIP);
 
@@ -415,8 +461,14 @@ private:
                 }
             }
 
+            // Check if server is shutting down (use static flag - safe after Server destruction)
+            if (s_serverShuttingDown) {
+                closesocket(sock);
+                return;
+            }
+
             HttpResponse resp(404);
-            if (m_httpHandler) {
+            if (m_running && m_httpHandler) {
                 resp = m_httpHandler(path);
             }
 
@@ -459,36 +511,55 @@ private:
         // Create connection
         auto conn = std::make_shared<Connection>(sock, clientIP);
 
+        // Check if server is shutting down (use static flag - safe after Server destruction)
+        if (s_serverShuttingDown) {
+            closesocket(sock);
+            return;
+        }
+
         {
             std::lock_guard<std::mutex> lock(m_connectionsMutex);
             m_connections.push_back(conn);
         }
 
-        if (m_onConnect) {
-            m_onConnect(conn);
+        // Copy callback to local variable to avoid race condition
+        auto onConnect = m_onConnect;
+        if (!s_serverShuttingDown && m_running && onConnect) {
+            onConnect(conn);
         }
 
-        // Message loop
+        // Message loop - use static flag for outer check, member for inner
         Frame frame;
-        while (m_running && !conn->isClosed()) {
+        while (!s_serverShuttingDown && m_running && !conn->isClosed()) {
             if (!conn->readFrame(frame)) {
                 break;
             }
 
+            // Check shutdown status again before processing
+            if (s_serverShuttingDown) break;
+
             switch (frame.opcode) {
             case TEXT:
-                if (m_onMessage) {
-                    std::string msg(frame.payload.begin(), frame.payload.end());
-                    m_onMessage(conn, msg);
+                {
+                    auto onMessage = m_onMessage;
+                    if (!s_serverShuttingDown && m_running && onMessage) {
+                        std::string msg(frame.payload.begin(), frame.payload.end());
+                        onMessage(conn, msg);
+                    }
                 }
                 break;
             case BINARY:
-                if (m_onBinary) {
-                    m_onBinary(conn, frame.payload.data(), frame.payload.size());
+                {
+                    auto onBinary = m_onBinary;
+                    if (!s_serverShuttingDown && m_running && onBinary) {
+                        onBinary(conn, frame.payload.data(), frame.payload.size());
+                    }
                 }
                 break;
             case PING:
-                conn->sendFrame(PONG, frame.payload.data(), frame.payload.size());
+                if (!s_serverShuttingDown) {
+                    conn->sendFrame(PONG, frame.payload.data(), frame.payload.size());
+                }
                 break;
             case CLOSE:
                 conn->close();
@@ -501,15 +572,22 @@ private:
         // Cleanup
         conn->close();
 
-        if (m_onDisconnect) {
-            m_onDisconnect(conn);
-        }
+        // Only call onDisconnect if server is still running (check static flag first)
+        if (!s_serverShuttingDown) {
+            auto onDisconnect = m_onDisconnect;
+            if (m_running && onDisconnect) {
+                onDisconnect(conn);
+            }
 
-        std::lock_guard<std::mutex> lock(m_connectionsMutex);
-        m_connections.erase(
-            std::remove_if(m_connections.begin(), m_connections.end(),
-                [&conn](const std::shared_ptr<Connection>& c) { return c.get() == conn.get(); }),
-            m_connections.end());
+            // Remove from connections list
+            {
+                std::lock_guard<std::mutex> lock(m_connectionsMutex);
+                m_connections.erase(
+                    std::remove_if(m_connections.begin(), m_connections.end(),
+                        [&conn](const std::shared_ptr<Connection>& c) { return c.get() == conn.get(); }),
+                    m_connections.end());
+            }
+        }
     }
 
     std::string generateAcceptKey(const std::string& key) {
@@ -642,6 +720,11 @@ private:
 
     std::vector<std::shared_ptr<Connection>> m_connections;
     std::mutex m_connectionsMutex;
+
+    // Thread counting for safe shutdown
+    std::atomic<int> m_activeThreads;
+    std::mutex m_threadCountMutex;
+    std::condition_variable m_threadCountCV;
 
     MessageHandler m_onMessage;
     BinaryHandler m_onBinary;

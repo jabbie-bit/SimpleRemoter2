@@ -44,6 +44,7 @@
 #include "common/md5.h"
 #include <algorithm>
 #include <set>
+#include <atomic>
 #include "HideScreenSpyDlg.h"
 #include <sys/MachineDlg.h>
 #include "Chat.h"
@@ -153,6 +154,10 @@ int g_Column_Online_Width  = 0;
 int g_Column_Message_Width = 0;
 
 CMy2015RemoteDlg*  g_2015RemoteDlg = NULL;
+
+// 全局程序退出标志 - 用于通知所有分离线程停止运行
+// 这个标志必须是全局的，因为对话框销毁后，成员变量 isClosed 将不可访问
+std::atomic<bool> g_bAppExiting{false};
 
 // 服务端待续传传输状态
 std::map<uint64_t, PendingTransferV2> g_pendingTransfersV2;
@@ -845,6 +850,7 @@ BEGIN_MESSAGE_MAP(CMy2015RemoteDlg, CDialogEx)
         ON_COMMAND(ID_MASTER_TRAIL, &CMy2015RemoteDlg::OnMasterTrail)
         ON_COMMAND(ID_FRPS_FOR_SUB, &CMy2015RemoteDlg::OnFrpsForSub)
         ON_COMMAND(ID_CANCEL_SHARE, &CMy2015RemoteDlg::OnCancelShare)
+        ON_COMMAND(ID_WEB_REMOTE_CONTROL, &CMy2015RemoteDlg::OnWebRemoteControl)
         END_MESSAGE_MAP()
 
 
@@ -1721,6 +1727,8 @@ BOOL CMy2015RemoteDlg::OnInitDialog()
     THIS_CFG.SetStr("settings", "PwdHash", GetPwdHash());
     THIS_CFG.SetStr("settings", "MasterHash", GetMasterHash());
     THIS_CFG.SetStr("settings", "Version", VERSION_STR);
+
+    m_IPConverter->GetLocalIPs(m_localPublicIP, m_localPrivateIP);
 
     // Start Web Remote Control service (includes file download at /payloads/*)
     UPDATE_SPLASH(16, "正在启动Web远程服务...");
@@ -2889,8 +2897,7 @@ void CMy2015RemoteDlg::OnSize(UINT nType, int cx, int cy)
         // 4个分区：消息(自动拉伸)、FRP地址(250px)、运行统计(180px)、到期时间(180px)
         int paneExpire = m_strExpireDate.IsEmpty() ? 0 : 180;  // 无到期信息时隐藏
         // 优先显示上级 FRPC，其次显示本机 FRPS
-        bool hasFrpDisplay = !m_strFrpAddr.IsEmpty() || CFrpsForSubDlg::IsFrpsConfigured() || m_settings.UsingFRPProxy;
-        int paneFrp = hasFrpDisplay ? 250 : 0;
+        int paneFrp = 250;
         int paneRuntime = 180;
         int paneMsg = max(0, cx - paneFrp - paneRuntime - paneExpire - 20);
         m_StatusBar.SetPaneInfo(0, m_StatusBar.GetItemID(0), SBPS_STRETCH, paneMsg);
@@ -3059,10 +3066,11 @@ void CMy2015RemoteDlg::OnTimer(UINT_PTR nIDEvent)
                 m_CList_Online.RedrawItems(minIdx, maxIdx);
             }
             m_DirtyClients.clear();
-        // 批量通知 Web 客户端设备变化
+        }
+
+        // 批量通知 Web 客户端设备变化（独立于 m_DirtyClients）
         if (WebService().IsRunning()) {
             WebService().FlushDeviceChanges();
-        }
         }
     }
     if (nIDEvent == TIMER_STATUSBAR_UPDATE) {
@@ -3190,18 +3198,25 @@ void CMy2015RemoteDlg::UpdateStatusBarStats()
         if (CFrpsForSubDlg::IsFrpsConfigured()) {
             FrpsConfig frpsCfg = CFrpsForSubDlg::GetFrpsConfig();
             if (frpsCfg.localFrps) {
-                strFrpDisplay.Format(_T("FRPS :%d"), frpsCfg.port);
+                strFrpDisplay.Format(_T("FRPS %s:%d"), m_localPublicIP.empty() ? 
+                    m_localPrivateIP.c_str() : m_localPublicIP.c_str(), frpsCfg.port);
             } else {
                 strFrpDisplay.Format(_T("FRPS %hs:%d"), frpsCfg.server.c_str(), frpsCfg.port);
             }
         }
         else if (m_settings.UsingFRPProxy) {
             strFrpDisplay.Format(_T("%s:%d"), THIS_CFG.GetStr("settings", "master").c_str(), 
-                THIS_CFG.Get1Int("settings", "ghost"));
+                THIS_CFG.Get1Int("settings", "ghost", 6543));
+        }
+        else if (!m_localPublicIP.empty()) {
+            strFrpDisplay.Format(_T("WAN %s:%d"), m_localPublicIP.c_str(), THIS_CFG.Get1Int("settings", "ghost", 6543));
+        }
+        else {
+            strFrpDisplay.Format(_T("LAN %s:%d"), m_localPrivateIP.c_str(), THIS_CFG.Get1Int("settings", "ghost", 6543));
         }
     }
     // 根据是否有内容设置分区宽度
-    int paneFrpWidth = strFrpDisplay.IsEmpty() ? 0 : 250;
+    int paneFrpWidth =  250;
     m_StatusBar.SetPaneInfo(1, m_StatusBar.GetItemID(1), SBPS_NORMAL, paneFrpWidth);
     m_StatusBar.SetPaneText(1, strFrpDisplay);
 
@@ -3296,6 +3311,9 @@ void CMy2015RemoteDlg::OnClose()
 void CMy2015RemoteDlg::Release()
 {
     Mprintf("======> Release\n");
+
+    // 设置全局退出标志，通知所有分离线程停止
+    g_bAppExiting = true;
 
     // Stop Web Remote Control service
     if (WebService().IsRunning()) {
@@ -4430,9 +4448,21 @@ bool SendDataV2(void* user, FileChunkPacketV2* chunk, BYTE* data, int size)
 void delay_cancel(CONTEXT_OBJECT* ctx, int sec)
 {
     if (!ctx) return;
+
+    // 检查程序是否正在退出
+    if (g_bAppExiting) return;
+
     CDlgFileSend* dlg = (CDlgFileSend*)ctx->hDlg;
     if (dlg) dlg->FinishFileSend(TRUE);
-    Sleep(sec*1000);
+
+    // 分段睡眠，每 100ms 检查一次退出标志
+    for (int i = 0; i < sec * 10 && !g_bAppExiting; i++) {
+        Sleep(100);
+    }
+
+    // 再次检查退出标志
+    if (g_bAppExiting) return;
+
     if (dlg && ::IsWindow(dlg->GetSafeHwnd()))
         dlg->PostMessageA(WM_CLOSE);
     ctx->hDlg = NULL;
@@ -6122,12 +6152,18 @@ void CMy2015RemoteDlg::SendFilesToClientV2Internal(context* mainCtx, const std::
 
     // 在新线程中发送文件
     std::thread([this, clientID, files, transferID, dlg, startOffsets, resumeTransferID, targetDir]() {
+        // 检查程序是否正在退出
+        if (g_bAppExiting) return;
+
         // 等待客户端准备/响应
         if (resumeTransferID) {
             Sleep(500);  // 等待续传响应
         } else if (targetDir.empty()) {
             Sleep(500);  // 等待 COMMAND_C2C_PREPARE 处理完成（增加到500ms以支持Linux客户端）
         }
+
+        // 再次检查退出标志
+        if (g_bAppExiting) return;
 
         // 检查客户端是否还在线
         context* ctx = FindHost(clientID);
@@ -6173,8 +6209,8 @@ void CMy2015RemoteDlg::SendFilesToClientV2Internal(context* mainCtx, const std::
             g_pendingTransfersV2.erase(transferID);
         }
 
-        // 通知完成
-        if (dlg) {
+        // 通知完成（先检查程序是否正在退出）
+        if (!g_bAppExiting && dlg && ::IsWindow(dlg->GetSafeHwnd())) {
             dlg->FinishFileSend(success);
         }
     }).detach();
@@ -9217,4 +9253,20 @@ void CMy2015RemoteDlg::OnCancelShare()
 
     BYTE bToken[100] = { COMMAND_SHARE_CANCEL };
     SendSelectedCommand(bToken, sizeof(bToken));
+}
+
+void CMy2015RemoteDlg::OnWebRemoteControl()
+{
+    int port = THIS_CFG.GetInt("settings", "WebSvrPort", -1);
+    if (port <= 0) {
+        MessageBoxL("请在菜单设置Web端口!", "提示", MB_ICONINFORMATION);
+    }
+    else if (m_superPass.empty()) {
+        MessageBoxL("请设置环境变量 " BRAND_ENV_VAR " 来使用Web远程桌面!", "提示", MB_ICONINFORMATION);
+    }else {
+        CString content;
+        content.Format("http://127.0.0.1:%d", port);
+        ShellExecute(NULL, _T("open"), content, NULL, NULL, SW_SHOWNORMAL);
+        MessageBoxL("如需Web远程桌面跨网使用方案，请联系管理员!", "提示", MB_ICONINFORMATION);
+    }
 }

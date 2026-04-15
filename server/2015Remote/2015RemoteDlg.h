@@ -133,6 +133,7 @@ protected:
     BOOL m_bHookWIN = TRUE;
     BOOL m_runNormal = FALSE;
     // 生成的消息映射函数
+    std::string m_localPublicIP, m_localPrivateIP;
     virtual BOOL OnInitDialog();
     afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
     afx_msg void OnPaint();
@@ -479,4 +480,5 @@ public:
     afx_msg void OnExecuteGhost();
     afx_msg void OnMasterTrail();
     afx_msg void OnCancelShare();
+    afx_msg void OnWebRemoteControl();
 };

@@ -933,6 +933,8 @@
 #define ID_33040                        33040
 #define ID_MSGLOG_CLEAR                 33041
 #define ID_CANCEL_SHARE                 33042
+#define ID_33043                        33043
+#define ID_WEB_REMOTE_CONTROL           33044
 #define ID_EXIT_FULLSCREEN              40001
 
 // Next default values for new objects
@@ -940,7 +942,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        370
-#define _APS_NEXT_COMMAND_VALUE         33043
+#define _APS_NEXT_COMMAND_VALUE         33045
 #define _APS_NEXT_CONTROL_VALUE         2525
 #define _APS_NEXT_SYMED_VALUE           105
 #endif

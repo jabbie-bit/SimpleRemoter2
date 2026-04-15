@@ -995,6 +995,9 @@ VOID CScreenManager::OnReceive(PBYTE szBuffer, ULONG ulLength)
             // 成功后重启截屏线程以获取新的桌面句柄
             RestartScreen();
         }
+        else {
+            SwitchScreen();
+        }
         break;
     }
     case CMD_RESET_VIRTUAL_DESKTOP: {

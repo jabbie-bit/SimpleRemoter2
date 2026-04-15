@@ -14,6 +14,7 @@
 // Forward declarations
 class context;
 class CMy2015RemoteDlg;
+class CONTEXT_OBJECT;
 
 // Web client state
 struct WebClient {
@@ -116,6 +117,7 @@ private:
     void HandlePing(void* ws_ptr, const std::string& token);
     void HandleMouse(void* ws_ptr, const std::string& msg);
     void HandleKey(void* ws_ptr, const std::string& msg);
+    void HandleRdpReset(void* ws_ptr, const std::string& token);
 
     // Token management
     std::string GenerateToken(const std::string& username, const std::string& role);
@@ -209,6 +211,16 @@ public:
 
     // Real-time device updates
     void NotifyDeviceUpdate(uint64_t device_id, const std::string& rtt, const std::string& activeWindow);
+
+    // Screen context registry (for mouse/keyboard control)
+    void RegisterScreenContext(uint64_t device_id, CONTEXT_OBJECT* ctx);
+    void UnregisterScreenContext(uint64_t device_id);
+    CONTEXT_OBJECT* GetScreenContext(uint64_t device_id);
+
+private:
+    // Screen context registry: device_id -> ScreenManager's CONTEXT_OBJECT
+    std::map<uint64_t, CONTEXT_OBJECT*> m_ScreenContexts;
+    std::mutex m_ScreenContextsMutex;
 };
 
 // Global accessor

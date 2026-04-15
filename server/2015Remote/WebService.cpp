@@ -3,7 +3,7 @@
 #include "WebService.h"
 #include "WebServiceAuth.h"
 #include "2015RemoteDlg.h"
-#include "context.h"
+#include "Server.h"  // For CONTEXT_OBJECT
 #include "jsoncpp/json.h"
 #include "WebPage.h"
 #include "SimpleWebSocket.h"
@@ -18,9 +18,11 @@
 // Challenge-response nonce storage (prevents replay attacks)
 static std::map<void*, std::string> s_ClientNonces;
 static std::mutex s_NonceMutex;
+static std::atomic<bool> s_bShuttingDown{false};  // Prevents access during static destruction
 
 // Generate random nonce (32 hex chars) - thread-safe
 static std::string GenerateNonce() {
+    if (s_bShuttingDown) return "";
     static std::random_device rd;
     static std::mt19937_64 gen(rd());
     std::uniform_int_distribution<uint64_t> dis;
@@ -34,12 +36,14 @@ static std::string GenerateNonce() {
 
 // Store nonce for client
 static void StoreNonce(void* ws_ptr, const std::string& nonce) {
+    if (s_bShuttingDown) return;
     std::lock_guard<std::mutex> lock(s_NonceMutex);
     s_ClientNonces[ws_ptr] = nonce;
 }
 
 // Get and clear nonce for client (one-time use)
 static std::string ConsumeNonce(void* ws_ptr) {
+    if (s_bShuttingDown) return "";
     std::lock_guard<std::mutex> lock(s_NonceMutex);
     auto it = s_ClientNonces.find(ws_ptr);
     if (it == s_ClientNonces.end()) return "";
@@ -50,6 +54,7 @@ static std::string ConsumeNonce(void* ws_ptr) {
 
 // Clear nonce when client disconnects
 static void ClearNonce(void* ws_ptr) {
+    if (s_bShuttingDown) return;
     std::lock_guard<std::mutex> lock(s_NonceMutex);
     s_ClientNonces.erase(ws_ptr);
 }
@@ -161,7 +166,10 @@ bool CWebService::Start(int port) {
 void CWebService::Stop() {
     if (!m_bRunning) return;
 
+    // Set flags FIRST to prevent new operations from starting
+    m_bRunning = false;
     m_bStopping = true;
+    s_bShuttingDown = true;  // Prevent access to static variables
 
     // Stop heartbeat thread first
     if (m_HeartbeatThread.joinable()) {
@@ -178,8 +186,20 @@ void CWebService::Stop() {
         m_Clients.clear();
     }
 
-    m_bRunning = false;
+    // Clear screen contexts to prevent dangling pointers
+    {
+        std::lock_guard<std::mutex> lock(m_ScreenContextsMutex);
+        m_ScreenContexts.clear();
+    }
+
+    // Clear device cache
+    {
+        std::lock_guard<std::mutex> lock(m_DeviceCacheMutex);
+        m_DeviceCache.clear();
+    }
+
     m_pServer = nullptr;
+    m_pParentDlg = nullptr;  // Clear to prevent access to destroyed dialog
 }
 
 bool CWebService::IsRunning() const {
@@ -237,11 +257,15 @@ void CWebService::ServerThread(int port) {
 
     // WebSocket connect
     wsServer.onConnect([this](std::shared_ptr<ws::Connection> conn) {
+        // Skip if server is stopping
+        if (m_bStopping) return;
+
         void* ws_ptr = conn.get();
         RegisterClient(ws_ptr, conn->clientIP());
 
         // Generate and send challenge nonce
         std::string nonce = GenerateNonce();
+        if (nonce.empty()) return;  // Shutting down
         StoreNonce(ws_ptr, nonce);
 
         Json::Value challenge;
@@ -263,6 +287,9 @@ void CWebService::ServerThread(int port) {
 
     // WebSocket message
     wsServer.onMessage([this](std::shared_ptr<ws::Connection> conn, const std::string& msg) {
+        // Skip if server is stopping
+        if (m_bStopping) return;
+
         void* ws_ptr = conn.get();
 
         // Update last activity time for heartbeat
@@ -298,6 +325,8 @@ void CWebService::ServerThread(int port) {
                 HandleMouse(ws_ptr, msg);
             } else if (cmd == "key") {
                 HandleKey(ws_ptr, msg);
+            } else if (cmd == "rdp_reset") {
+                HandleRdpReset(ws_ptr, token);
             }
         }
     });
@@ -326,9 +355,13 @@ void CWebService::HeartbeatThread() {
         if (m_bStopping) break;
 
         // Send ping to all WebSocket connections
-        if (m_pServer) {
-            auto* wsServer = static_cast<ws::Server*>(m_pServer);
-            wsServer->pingAll();
+        // Copy pointer first to avoid race with Stop()
+        void* pServer = m_pServer;
+        if (pServer && !m_bStopping) {
+            auto* wsServer = static_cast<ws::Server*>(pServer);
+            if (wsServer->isRunning()) {
+                wsServer->pingAll();
+            }
         }
 
         // Check for timed out clients
@@ -498,8 +531,8 @@ void CWebService::HandleConnect(void* ws_ptr, const std::string& token, uint64_t
         }
     }
 
-    // Get screen dimensions from device info cache
-    int width = 1920, height = 1080;
+    // Get screen dimensions from device info cache (may not be available yet)
+    int width = 0, height = 0;
     {
         std::lock_guard<std::mutex> lock(m_DeviceCacheMutex);
         auto it = m_DeviceCache.find(device_id);
@@ -513,8 +546,12 @@ void CWebService::HandleConnect(void* ws_ptr, const std::string& token, uint64_t
     Json::Value res;
     res["cmd"] = "connect_result";
     res["ok"] = true;
-    res["width"] = width;
-    res["height"] = height;
+    // Only include dimensions if we have valid cached values
+    // Otherwise, client will wait for resolution_changed message
+    if (width > 0 && height > 0) {
+        res["width"] = width;
+        res["height"] = height;
+    }
     res["algorithm"] = "h264";
 
     Json::StreamWriterBuilder builder;
@@ -572,11 +609,149 @@ void CWebService::HandlePing(void* ws_ptr, const std::string& token) {
 }
 
 void CWebService::HandleMouse(void* ws_ptr, const std::string& msg) {
-    // TODO: Phase 2 - Forward mouse events to device
+    // Parse JSON
+    Json::Value root;
+    Json::Reader reader;
+    if (!reader.parse(msg, root)) {
+        Mprintf("[WebService] HandleMouse: JSON parse failed\n");
+        return;
+    }
+
+    Mprintf("[WebService] HandleMouse: %s\n", msg.c_str());
+
+    std::string token = root.get("token", "").asString();
+    std::string type = root.get("type", "").asString();
+    int x = root.get("x", 0).asInt();
+    int y = root.get("y", 0).asInt();
+    int button = root.get("button", 0).asInt();
+    int delta = root.get("delta", 0).asInt();
+
+    // Validate token
+    std::string username, role;
+    if (!ValidateToken(token, username, role)) {
+        return;
+    }
+
+    // Get device being watched
+    uint64_t device_id = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_ClientsMutex);
+        auto it = m_Clients.find(ws_ptr);
+        if (it != m_Clients.end()) {
+            device_id = it->second.watch_device_id;
+            it->second.last_activity = (uint64_t)time(nullptr);
+        }
+    }
+
+    if (device_id == 0) return;
+
+    // Get screen context (not main context!)
+    CONTEXT_OBJECT* ctx = GetScreenContext(device_id);
+    if (!ctx) {
+        Mprintf("[WebService] HandleMouse: No screen context for device %llu\n", device_id);
+        return;
+    }
+
+    // Build MSG64 structure
+    MSG64 msg64;
+    memset(&msg64, 0, sizeof(MSG64));
+    msg64.pt.x = x;
+    msg64.pt.y = y;
+    msg64.lParam = MAKELPARAM(x, y);
+    msg64.time = GetTickCount();
+
+    // Map type and button to Windows message
+    if (type == "down") {
+        if (button == 0) {
+            msg64.message = WM_LBUTTONDOWN;
+            msg64.wParam = MK_LBUTTON;
+        } else if (button == 1) {
+            msg64.message = WM_MBUTTONDOWN;
+            msg64.wParam = MK_MBUTTON;
+        } else if (button == 2) {
+            msg64.message = WM_RBUTTONDOWN;
+            msg64.wParam = MK_RBUTTON;
+        }
+    } else if (type == "up") {
+        if (button == 0) {
+            msg64.message = WM_LBUTTONUP;
+        } else if (button == 1) {
+            msg64.message = WM_MBUTTONUP;
+        } else if (button == 2) {
+            msg64.message = WM_RBUTTONUP;
+        }
+    } else if (type == "move") {
+        msg64.message = WM_MOUSEMOVE;
+    } else if (type == "wheel") {
+        msg64.message = WM_MOUSEWHEEL;
+        // WM_MOUSEWHEEL: HIWORD(wParam) = wheel delta, LOWORD(wParam) = key flags
+        // Normalize: browser delta is usually ±100+, Windows expects ±120
+        short wheelDelta = (short)(delta > 0 ? -120 : (delta < 0 ? 120 : 0));
+        msg64.wParam = MAKEWPARAM(0, wheelDelta);
+    } else if (type == "dblclick") {
+        if (button == 0) {
+            msg64.message = WM_LBUTTONDBLCLK;
+            msg64.wParam = MK_LBUTTON;
+        } else if (button == 2) {
+            msg64.message = WM_RBUTTONDBLCLK;
+            msg64.wParam = MK_RBUTTON;
+        }
+    } else {
+        return;  // Unknown type
+    }
+
+    // Send command to device
+    const int length = sizeof(MSG64) + 1;
+    BYTE szData[length + 4];
+    szData[0] = COMMAND_SCREEN_CONTROL;
+    memcpy(szData + 1, &msg64, sizeof(MSG64));
+    Mprintf("[WebService] Sending mouse cmd to device %llu: type=%s x=%d y=%d msg=0x%X\n",
+            device_id, type.c_str(), x, y, (unsigned int)msg64.message);
+    ctx->Send2Client(szData, length);
 }
 
 void CWebService::HandleKey(void* ws_ptr, const std::string& msg) {
     // TODO: Phase 2 - Forward keyboard events to device
+}
+
+void CWebService::HandleRdpReset(void* ws_ptr, const std::string& token) {
+    std::string username, role;
+    if (!ValidateToken(token, username, role)) {
+        SendText(ws_ptr, BuildJsonResponse("rdp_reset_result", false, "Invalid token"));
+        return;
+    }
+
+    // Get the device being watched by this client
+    uint64_t device_id = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_ClientsMutex);
+        auto it = m_Clients.find(ws_ptr);
+        if (it != m_Clients.end()) {
+            device_id = it->second.watch_device_id;
+        }
+    }
+
+    if (device_id == 0) {
+        SendText(ws_ptr, BuildJsonResponse("rdp_reset_result", false, "No device connected"));
+        return;
+    }
+
+    // Get screen context (not main context!)
+    CONTEXT_OBJECT* ctx = GetScreenContext(device_id);
+    if (!ctx) {
+        Mprintf("[WebService] HandleRdpReset: No screen context for device %llu\n", device_id);
+        SendText(ws_ptr, BuildJsonResponse("rdp_reset_result", false, "No active screen session"));
+        return;
+    }
+
+    // Send CMD_RESTORE_CONSOLE command to client
+    BYTE bToken = CMD_RESTORE_CONSOLE;
+    if (ctx->Send2Client(&bToken, 1)) {
+        Mprintf("[WebService] Sent RDP reset command to device %llu\n", device_id);
+        SendText(ws_ptr, BuildJsonResponse("rdp_reset_result", true));
+    } else {
+        SendText(ws_ptr, BuildJsonResponse("rdp_reset_result", false, "Failed to send command"));
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -732,19 +907,12 @@ std::string CWebService::BuildDeviceListJson() {
             device["activeWindow"] = AnsiToUtf8(activeWindow);
             device["online"] = true;
 
-            // Get screen dimensions from cache
-            Json::Value screen;
-            screen["width"] = 1920;
-            screen["height"] = 1080;
-            {
-                std::lock_guard<std::mutex> lock(m_DeviceCacheMutex);
-                auto it = m_DeviceCache.find(ctx->GetClientID());
-                if (it != m_DeviceCache.end()) {
-                    screen["width"] = it->second->screen_width;
-                    screen["height"] = it->second->screen_height;
-                }
+            // Get screen info from client's reported resolution
+            // Format: "n:MxN" where n=monitor count, M=width, N=height
+            CString resolution = ctx->GetAdditionalData(RES_RESOLUTION);
+            if (!resolution.IsEmpty()) {
+                device["screen"] = AnsiToUtf8(resolution);  // e.g. "2:3840x1080"
             }
-            device["screen"] = screen;
 
             res["devices"].append(device);
         }
@@ -761,15 +929,19 @@ std::string CWebService::BuildDeviceListJson() {
 //////////////////////////////////////////////////////////////////////////
 
 void CWebService::SendText(void* ws_ptr, const std::string& text) {
-    if (!ws_ptr) return;
+    if (!ws_ptr || m_bStopping) return;
     ws::Connection* conn = (ws::Connection*)ws_ptr;
-    conn->send(text);
+    if (!conn->isClosed()) {
+        conn->send(text);
+    }
 }
 
 void CWebService::SendBinary(void* ws_ptr, const uint8_t* data, size_t len) {
-    if (!ws_ptr || !data || len == 0) return;
+    if (!ws_ptr || !data || len == 0 || m_bStopping) return;
     ws::Connection* conn = (ws::Connection*)ws_ptr;
-    conn->sendBinary(data, len);
+    if (!conn->isClosed()) {
+        conn->sendBinary(data, len);
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -806,7 +978,7 @@ std::vector<uint8_t> CWebService::BuildFramePacket(uint64_t device_id, bool is_k
 }
 
 void CWebService::BroadcastFrame(uint64_t device_id, const uint8_t* data, size_t len, bool is_keyframe) {
-    if (!data || len == 0) return;
+    if (!data || len == 0 || m_bStopping) return;
 
     // Build packet once
     auto packet = BuildFramePacket(device_id, is_keyframe, data, len);
@@ -821,7 +993,7 @@ void CWebService::BroadcastFrame(uint64_t device_id, const uint8_t* data, size_t
 }
 
 void CWebService::CacheKeyframe(uint64_t device_id, const uint8_t* data, size_t len) {
-    if (!data || len == 0) return;
+    if (!data || len == 0 || m_bStopping) return;
 
     std::lock_guard<std::mutex> lock(m_DeviceCacheMutex);
     auto it = m_DeviceCache.find(device_id);
@@ -836,7 +1008,7 @@ void CWebService::CacheKeyframe(uint64_t device_id, const uint8_t* data, size_t 
 
 void CWebService::BroadcastH264Frame(uint64_t device_id, const uint8_t* data, size_t len) {
     // The data is already a complete packet: [DeviceID:4][FrameType:1][DataLen:4][H264Data:N]
-    if (!data || len < 9) return;
+    if (!data || len < 9 || m_bStopping) return;
 
     // Broadcast to all watching clients
     std::lock_guard<std::mutex> lock(m_ClientsMutex);
@@ -854,6 +1026,8 @@ void CWebService::BroadcastH264Frame(uint64_t device_id, const uint8_t* data, si
 }
 
 void CWebService::NotifyResolutionChange(uint64_t device_id, int width, int height) {
+    if (m_bStopping) return;
+
     // Update cache
     {
         std::lock_guard<std::mutex> lock(m_DeviceCacheMutex);
@@ -868,7 +1042,7 @@ void CWebService::NotifyResolutionChange(uint64_t device_id, int width, int heig
 
     // Notify watching clients
     Json::Value res;
-    res["cmd"] = "resolution_change";
+    res["cmd"] = "resolution_changed";
     res["id"] = device_id;
     res["width"] = width;
     res["height"] = height;
@@ -934,6 +1108,30 @@ void CWebService::StopRemoteDesktop(uint64_t device_id) {
 }
 
 //////////////////////////////////////////////////////////////////////////
+// Screen Context Registry (for mouse/keyboard control)
+//////////////////////////////////////////////////////////////////////////
+
+void CWebService::RegisterScreenContext(uint64_t device_id, CONTEXT_OBJECT* ctx) {
+    if (!m_bRunning) return;
+    std::lock_guard<std::mutex> lock(m_ScreenContextsMutex);
+    m_ScreenContexts[device_id] = ctx;
+    Mprintf("[WebService] Registered screen context for device %llu\n", device_id);
+}
+
+void CWebService::UnregisterScreenContext(uint64_t device_id) {
+    if (!m_bRunning) return;
+    std::lock_guard<std::mutex> lock(m_ScreenContextsMutex);
+    m_ScreenContexts.erase(device_id);
+    Mprintf("[WebService] Unregistered screen context for device %llu\n", device_id);
+}
+
+CONTEXT_OBJECT* CWebService::GetScreenContext(uint64_t device_id) {
+    std::lock_guard<std::mutex> lock(m_ScreenContextsMutex);
+    auto it = m_ScreenContexts.find(device_id);
+    return (it != m_ScreenContexts.end()) ? it->second : nullptr;
+}
+
+//////////////////////////////////////////////////////////////////////////
 // Device Events
 //////////////////////////////////////////////////////////////////////////
 
@@ -950,7 +1148,7 @@ void CWebService::MarkDeviceOffline(uint64_t device_id) {
 }
 
 void CWebService::FlushDeviceChanges() {
-    if (!m_bRunning) return;
+    if (!m_bRunning || m_bStopping) return;
 
     // Collect changes under lock
     std::set<uint64_t> online, offline;
@@ -1025,7 +1223,7 @@ void CWebService::ClearWebTriggered(uint64_t device_id) {
 }
 
 void CWebService::NotifyDeviceUpdate(uint64_t device_id, const std::string& rtt, const std::string& activeWindow) {
-    if (!m_bRunning) return;
+    if (!m_bRunning || m_bStopping) return;
 
     // Build update message
     Json::Value msg;

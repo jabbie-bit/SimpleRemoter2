@@ -755,12 +755,18 @@ BOOL CScreenSpyDlg::OnInitDialog()
     if (pMain)
         ::PostMessage(pMain->GetSafeHwnd(), WM_SESSION_ACTIVATED, (WPARAM)this, 0);
 
+    // 注册屏幕上下文到 WebService（用于 Web 端鼠标/键盘控制）
+    WebService().RegisterScreenContext(m_ClientID, m_ContextObject);
+
     return TRUE;
 }
 
 
 VOID CScreenSpyDlg::OnClose()
 {
+    // 注销屏幕上下文（Web 端控制）
+    WebService().UnregisterScreenContext(m_ClientID);
+
     m_bIsClosed = true;
     m_bIsCtrl = FALSE;
     CWnd* pMain = AfxGetMainWnd();

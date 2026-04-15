@@ -370,7 +370,7 @@ inline std::string GetWebPageHTML() {
             padding: 0;
         }
         #screen-page.active { display: flex !important; flex-direction: column; }
-        .canvas-container { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #111; }
+        .canvas-container { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #111; position: relative; }
         #screen-canvas { max-width: 100%; max-height: 100%; }
         .screen-toolbar {
             background: linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 100%);
@@ -438,8 +438,12 @@ inline std::string GetWebPageHTML() {
             max-height: 100dvh !important;
             object-fit: contain;
         }
-        #screen-page.pseudo-fullscreen .mobile-controls {
-            display: none !important; /* Hide controls in fullscreen, tap to exit */
+        #screen-page.pseudo-fullscreen .toolbar-toggle {
+            display: block; /* Show toolbar toggle in fullscreen */
+        }
+        #screen-page:fullscreen .toolbar-toggle,
+        #screen-page:-webkit-full-screen .toolbar-toggle {
+            display: block;
         }
         .compat-warning {
             background: linear-gradient(90deg, #ff9800, #f57c00);
@@ -450,31 +454,79 @@ inline std::string GetWebPageHTML() {
             font-weight: 500;
         }
         /* Mobile floating controls */
-        .mobile-controls {
-            display: none;
+        /* Floating toolbar menu - minimal icon style */
+        .floating-toolbar {
             position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 1000;
-            flex-direction: column;
-            gap: 10px;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1001;
+            display: none;
+            background: rgba(0,0,0,0.75);
+            border-radius: 22px;
+            padding: 4px 8px;
+            gap: 4px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.4);
         }
-        .mobile-btn {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
+        .floating-toolbar.visible { display: flex; align-items: center; }
+        .toolbar-btn {
+            background: transparent;
             border: none;
-            background: rgba(233, 69, 96, 0.9);
             color: #fff;
             font-size: 20px;
             cursor: pointer;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            transition: all 0.15s;
             display: flex;
             align-items: center;
             justify-content: center;
         }
-        .mobile-btn:active { transform: scale(0.95); }
-        .mobile-btn.secondary { background: rgba(255,255,255,0.2); }
+        .toolbar-btn:hover { background: rgba(255,255,255,0.2); }
+        .toolbar-btn:active { transform: scale(0.9); background: rgba(255,255,255,0.3); }
+        .toolbar-btn.active { background: rgba(52,199,89,0.8); }
+        .toolbar-btn.active:hover { background: rgba(52,199,89,1); }
+        .toolbar-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .toolbar-btn:disabled:hover { background: transparent; }
+        .toolbar-btn:disabled:active { transform: none; }
+        .toolbar-toggle {
+            position: fixed;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(0,0,0,0.5);
+            border: none;
+            color: #fff;
+            font-size: 16px;
+            cursor: pointer;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .toolbar-toggle:hover { background: rgba(0,0,0,0.7); }
+        .toolbar-toggle:active { transform: translateX(-50%) scale(0.9); }
+        /* Zoom indicator */
+        .zoom-indicator {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 1002;
+            display: none;
+            pointer-events: none;
+        }
+        .zoom-indicator.visible { display: block; }
         .touch-indicator {
             position: fixed;
             width: 30px;
@@ -486,6 +538,19 @@ inline std::string GetWebPageHTML() {
             transform: translate(-50%, -50%);
             z-index: 999;
         }
+        .cursor-overlay {
+            position: fixed;
+            width: 24px;
+            height: 24px;
+            pointer-events: none;
+            display: none;
+            z-index: 1002;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="%23fff" stroke="%23000" stroke-width="1.5" d="M4 4l7 17 2.5-6.5L20 12z"/></svg>') no-repeat;
+            background-size: contain;
+            filter: drop-shadow(2px 2px 3px rgba(0,0,0,0.6));
+            transform-origin: 0 0;
+        }
+        .cursor-overlay.active { display: block; }
         /* Mobile responsive */
         @media (max-width: 768px) {
             .page { padding: 10px; }
@@ -505,7 +570,6 @@ inline std::string GetWebPageHTML() {
             .toolbar-info .conn-info { font-size: 11px; }
             .screen-status { font-size: 11px; padding: 4px 10px; }
             .fullscreen-btn { font-size: 16px; padding: 4px 8px; }
-            .mobile-controls { display: flex; }
             .pagination { flex-wrap: wrap; gap: 4px; }
             .pagination button { padding: 6px 10px; font-size: 12px; }
             .login-form { padding: 24px; margin: 10px; }
@@ -569,13 +633,16 @@ inline std::string GetWebPageHTML() {
                 <button class="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen (F11)">&#x26F6;</button>
             </div>
         </div>
-        <div class="canvas-container"><canvas id="screen-canvas"></canvas></div>
+        <div class="canvas-container"><canvas id="screen-canvas"></canvas><div class="cursor-overlay" id="cursor-overlay"></div></div>
         <div class="touch-indicator" id="touch-indicator"></div>
-        <div class="mobile-controls" id="mobile-controls">
-            <button class="mobile-btn" onclick="toggleKeyboard()" title="Keyboard">&#x2328;</button>
-            <button class="mobile-btn secondary" onclick="sendRightClick()" title="Right Click">&#x1F5B1;</button>
-            <button class="mobile-btn secondary" onclick="toggleFullscreen()" title="Fullscreen">&#x26F6;</button>
+        <button class="toolbar-toggle" id="toolbar-toggle" onclick="toggleFloatingToolbar()">&#x2022;&#x2022;&#x2022;</button>
+        <div class="floating-toolbar" id="floating-toolbar">
+            <button class="toolbar-btn" onclick="sendRdpReset()" title="RDP Reset">&#x21BB;</button>
+            <button class="toolbar-btn" id="btn-mouse" onclick="toggleControl()" title="Mouse Control">&#x1F5B1;</button>
+            <button class="toolbar-btn" id="btn-keyboard" onclick="toggleKeyboard()" title="Keyboard" disabled>&#x2328;</button>
+            <button class="toolbar-btn" onclick="disconnect()" title="Disconnect">&#x2715;</button>
         </div>
+        <div class="zoom-indicator" id="zoom-indicator">100%</div>
         <input type="text" id="mobile-keyboard" style="position:fixed;left:-9999px;opacity:0;" autocomplete="off" autocorrect="off" autocapitalize="off">
     </div>
 )HTML";
@@ -733,8 +800,14 @@ inline std::string GetWebPageHTML() {
                 case 'connect_result':
                     if (!token) break;
                     if (msg.ok) {
-                        updateScreenStatus('connected');
-                        initDecoder(msg.width, msg.height);
+                        // Resolution may not be available yet (first connection)
+                        if (msg.width && msg.height) {
+                            updateScreenStatus('connected');
+                            initDecoder(msg.width, msg.height);
+                        } else {
+                            // Wait for resolution_changed message
+                            updateScreenStatus('waiting', 'Waiting for video...');
+                        }
                     } else {
                         updateScreenStatus('error', msg.msg);
                         setTimeout(() => showPage('devices-page'), 2000);
@@ -747,6 +820,7 @@ inline std::string GetWebPageHTML() {
                     getDevices();
                     break;
                 case 'resolution_changed':
+                    updateScreenStatus('connected');
                     initDecoder(msg.width, msg.height);
                     break;
                 case 'device_offline':
@@ -778,8 +852,17 @@ inline std::string GetWebPageHTML() {
         }
 
         function initDecoder(width, height) {
+            // Clear canvas before resizing to prevent residual content
+            ctx.setTransform(1, 0, 0, 1, 0, 0);  // Reset transform
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
             canvas.width = width;
             canvas.height = height;
+
+            // Clear again after resize (in case of smaller resolution)
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+
             // Set up vertical flip transform once (BMP is bottom-up)
             ctx.setTransform(1, 0, 0, -1, 0, height);
             if (decoder) { try { decoder.close(); } catch(e) {} }
@@ -948,7 +1031,7 @@ inline std::string GetWebPageHTML() {
                 list.innerHTML = '<div class="no-devices"><h3>No devices found</h3><p>Try adjusting your search or filter</p></div>';
             } else {
                 list.innerHTML = pageDevices.map(d => {
-                    const screenInfo = d.screen ? (d.screen.width + 'x' + d.screen.height) : '-';
+                    const screenInfo = d.screen || '-';  // e.g. "2:3840x1080"
                     const loc = d.location || '-';
                     const rtt = d.rtt || '-';
                     const ver = d.version || '-';
@@ -1015,7 +1098,10 @@ inline std::string GetWebPageHTML() {
         function updateScreenStatus(status, msg) {
             const el = document.getElementById('screen-status');
             el.className = 'screen-status ' + status;
-            el.textContent = status === 'connected' ? 'Connected' : (status === 'connecting' ? 'Connecting...' : (msg || 'Error'));
+            if (status === 'connected') el.textContent = 'Connected';
+            else if (status === 'connecting') el.textContent = 'Connecting...';
+            else if (status === 'waiting') el.textContent = msg || 'Waiting...';
+            else el.textContent = msg || 'Error';
         }
 
         async function login() {
@@ -1089,15 +1175,21 @@ inline std::string GetWebPageHTML() {
                 if (el.classList.contains('pseudo-fullscreen')) window.scrollTo(0, 1);
             }
         }
+)HTML";
 
-
-        // Double-tap to exit pseudo-fullscreen on mobile
+    // Part 14: JavaScript - Toolbar, zoom and touch
+    html += R"HTML(
+        // Double-tap to exit pseudo-fullscreen on mobile (only when control mode is OFF)
         let lastTapTime = 0;
         document.getElementById('screen-canvas').addEventListener('touchend', function(e) {
+            // When control mode is enabled, double-tap sends double-click, not exit fullscreen
+            if (controlEnabled) return;
             const el = document.getElementById('screen-page');
             if (!el.classList.contains('pseudo-fullscreen')) return;
+            // Only exit fullscreen on single-finger double tap, not during pinch
+            if (touchState.touchCount > 1 || zoomState.isPinching || zoomState.scale > 1) return;
             const now = Date.now();
-            if (now - lastTapTime < 300) {
+            if (now - lastTapTime < 300 && e.changedTouches.length === 1) {
                 el.classList.remove('pseudo-fullscreen');
                 e.preventDefault();
             }
@@ -1111,10 +1203,244 @@ inline std::string GetWebPageHTML() {
             }
         });
 
-        // Mobile touch handling
-        let touchState = { lastTap: 0, longPressTimer: null, isDragging: false, lastX: 0, lastY: 0 };
+        // Control mode state (mouse/keyboard control)
+        let controlEnabled = false;
+
+        // Floating toolbar state
+        let toolbarVisible = false;
+        let toolbarHideTimer = null;
+
+        function toggleFloatingToolbar() {
+            const toolbar = document.getElementById('floating-toolbar');
+            toolbarVisible = !toolbarVisible;
+            toolbar.classList.toggle('visible', toolbarVisible);
+
+            // Auto-hide after 4 seconds
+            if (toolbarHideTimer) clearTimeout(toolbarHideTimer);
+            if (toolbarVisible) {
+                toolbarHideTimer = setTimeout(() => {
+                    toolbarVisible = false;
+                    toolbar.classList.remove('visible');
+                }, 4000);
+            }
+        }
+
+        function sendRdpReset() {
+            if (ws && ws.readyState === WebSocket.OPEN && token) {
+                ws.send(JSON.stringify({ cmd: 'rdp_reset', token }));
+                // Visual feedback - rotate icon
+                const btn = event.target;
+                btn.style.transform = 'rotate(360deg)';
+                btn.style.transition = 'transform 0.5s';
+                setTimeout(() => {
+                    btn.style.transform = '';
+                    btn.style.transition = '';
+                }, 500);
+            }
+        }
+
+        // Detect touch device (mobile/tablet)
+        const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+        function toggleControl() {
+            controlEnabled = !controlEnabled;
+            const btnMouse = document.getElementById('btn-mouse');
+            const btnKeyboard = document.getElementById('btn-keyboard');
+            const cursorOverlay = document.getElementById('cursor-overlay');
+            btnMouse.classList.toggle('active', controlEnabled);
+            btnKeyboard.disabled = !controlEnabled;
+            const canvas = document.getElementById('screen-canvas');
+            // Hide local cursor when control enabled
+            canvas.style.cursor = controlEnabled ? 'none' : 'default';
+            // Only show cursor overlay on touch devices (touchpad mode)
+            // On desktop, remote screen already shows the cursor
+            cursorOverlay.classList.toggle('active', controlEnabled && isTouchDevice);
+        }
+
+        // Update cursor overlay position (accounting for zoom/pan transform)
+        // Only used on touch devices (touchpad mode)
+        function updateCursorOverlay(canvasX, canvasY) {
+            if (!controlEnabled || !isTouchDevice) return;
+            const canvas = document.getElementById('screen-canvas');
+            const cursorOverlay = document.getElementById('cursor-overlay');
+
+            // Get canvas base rect (without transform, use container)
+            const container = document.querySelector('.canvas-container');
+            const containerRect = container.getBoundingClientRect();
+
+            // Calculate canvas position within container (centered)
+            const canvasDisplayWidth = canvas.offsetWidth;
+            const canvasDisplayHeight = canvas.offsetHeight;
+            const canvasLeft = containerRect.left + (containerRect.width - canvasDisplayWidth) / 2;
+            const canvasTop = containerRect.top + (containerRect.height - canvasDisplayHeight) / 2;
+
+            // Convert canvas coords to position on unzoomed canvas
+            const relX = canvasX / canvas.width;  // 0-1
+            const relY = canvasY / canvas.height; // 0-1
+
+            // Position on unzoomed canvas (in pixels from canvas top-left)
+            const unzoomedX = relX * canvasDisplayWidth;
+            const unzoomedY = relY * canvasDisplayHeight;
+
+            // Apply zoom transform
+            // Transform origin
+            const originX = canvasDisplayWidth * zoomState.originX / 100;
+            const originY = canvasDisplayHeight * zoomState.originY / 100;
+
+            // Scale around origin, then translate
+            const scaledX = originX + (unzoomedX - originX) * zoomState.scale + zoomState.translateX * zoomState.scale;
+            const scaledY = originY + (unzoomedY - originY) * zoomState.scale + zoomState.translateY * zoomState.scale;
+
+            // Final screen position
+            const screenX = canvasLeft + scaledX;
+            const screenY = canvasTop + scaledY;
+
+            cursorOverlay.style.left = screenX + 'px';
+            cursorOverlay.style.top = screenY + 'px';
+        }
+
+        // Pinch-to-zoom state
+        let zoomState = {
+            scale: 1,
+            minScale: 1,
+            maxScale: 4,
+            translateX: 0,
+            translateY: 0,
+            lastPinchDist: 0,
+            isPinching: false,
+            pinchCenterX: 0,
+            pinchCenterY: 0,
+            // Transform origin relative to canvas (percentage)
+            originX: 50,
+            originY: 50
+        };
+        const zoomIndicator = document.getElementById('zoom-indicator');
+        let zoomIndicatorTimer = null;
+
+        function showZoomIndicator() {
+            zoomIndicator.textContent = Math.round(zoomState.scale * 100) + '%';
+            zoomIndicator.classList.add('visible');
+            if (zoomIndicatorTimer) clearTimeout(zoomIndicatorTimer);
+            zoomIndicatorTimer = setTimeout(() => {
+                zoomIndicator.classList.remove('visible');
+            }, 1500);
+        }
+
+        function resetZoom() {
+            zoomState.scale = 1;
+            zoomState.translateX = 0;
+            zoomState.translateY = 0;
+            applyZoomTransform();
+            showZoomIndicator();
+        }
+
+        // Track previous scale to detect zoom reset
+        let prevScale = 1;
+
+        function applyZoomTransform() {
+            const container = document.querySelector('.canvas-container');
+            if (zoomState.scale === 1) {
+                canvas.style.transform = '';
+                canvas.style.transformOrigin = '';
+                // Reset all zoom state when scale returns to 1
+                zoomState.originX = 50;
+                zoomState.originY = 50;
+                zoomState.translateX = 0;
+                zoomState.translateY = 0;
+                // If we just returned from zoomed state, force cursor overlay update
+                if (prevScale !== 1 && controlEnabled) {
+                    console.log('[Zoom] Reset from ' + prevScale.toFixed(2) + ' to 1, updating cursor overlay');
+                    updateCursorOverlay(cursorState.x, cursorState.y);
+                }
+                prevScale = 1;
+            } else {
+                prevScale = zoomState.scale;
+                // Clamp translate to prevent canvas from going out of view
+                const rect = container.getBoundingClientRect();
+                const maxTranslateX = (canvas.width * zoomState.scale - rect.width) / 2 / zoomState.scale;
+                const maxTranslateY = (canvas.height * zoomState.scale - rect.height) / 2 / zoomState.scale;
+
+                if (canvas.width * zoomState.scale > rect.width) {
+                    zoomState.translateX = Math.max(-maxTranslateX, Math.min(maxTranslateX, zoomState.translateX));
+                } else {
+                    zoomState.translateX = 0;
+                }
+                if (canvas.height * zoomState.scale > rect.height) {
+                    zoomState.translateY = Math.max(-maxTranslateY, Math.min(maxTranslateY, zoomState.translateY));
+                } else {
+                    zoomState.translateY = 0;
+                }
+
+                // Use pinch center as transform origin
+                canvas.style.transformOrigin = zoomState.originX + '% ' + zoomState.originY + '%';
+                canvas.style.transform = 'scale(' + zoomState.scale + ') translate(' + zoomState.translateX + 'px, ' + zoomState.translateY + 'px)';
+            }
+        }
+
+        function getPinchDistance(touches) {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function getPinchCenter(touches) {
+            return {
+                x: (touches[0].clientX + touches[1].clientX) / 2,
+                y: (touches[0].clientY + touches[1].clientY) / 2
+            };
+        }
+
+        // Mobile touch handling (touchpad mode - like Microsoft Remote Desktop)
+        // Cursor position is separate from finger position
+        let cursorState = { x: 0, y: 0, initialized: false };  // Remote cursor position
+        let touchState = {
+            lastTap: 0, longPressTimer: null, isDragging: false,
+            lastX: 0, lastY: 0,  // Last touch screen position (for delta calculation)
+            touchCount: 0,
+            startX: 0, startY: 0,  // Touch start position (to detect tap vs drag)
+            moved: false,  // Did finger move significantly?
+            dragHoldTimer: null  // Timer for double-tap-hold drag detection
+        };
         const touchIndicator = document.getElementById('touch-indicator');
         const mobileKeyboard = document.getElementById('mobile-keyboard');
+
+        // Initialize cursor to center of screen
+        function initCursor() {
+            if (!cursorState.initialized && canvas.width > 0) {
+                cursorState.x = Math.round(canvas.width / 2);
+                cursorState.y = Math.round(canvas.height / 2);
+                cursorState.initialized = true;
+                updateCursorOverlay(cursorState.x, cursorState.y);
+            }
+        }
+
+        // Move cursor by delta (touchpad mode)
+        function moveCursorBy(dx, dy) {
+            initCursor();
+            // Sensitivity multiplier (adjust for comfortable control)
+            const sensitivity = 1.5;
+            cursorState.x = Math.max(0, Math.min(canvas.width, cursorState.x + dx * sensitivity));
+            cursorState.y = Math.max(0, Math.min(canvas.height, cursorState.y + dy * sensitivity));
+            updateCursorOverlay(cursorState.x, cursorState.y);
+            // Send move to remote
+            sendMouse('move', Math.round(cursorState.x), Math.round(cursorState.y), 0);
+        }
+
+        // Click at current cursor position
+        function clickAtCursor(button) {
+            initCursor();
+            const x = Math.round(cursorState.x);
+            const y = Math.round(cursorState.y);
+            sendMouse('down', x, y, button);
+            sendMouse('up', x, y, button);
+        }
+
+        function dblClickAtCursor() {
+            initCursor();
+            const x = Math.round(cursorState.x);
+            const y = Math.round(cursorState.y);
+            sendMouse('dblclick', x, y, 0);
+        }
 
         function getTouchPos(touch) {
             const rect = canvas.getBoundingClientRect();
@@ -1126,13 +1452,21 @@ inline std::string GetWebPageHTML() {
             };
         }
 
-        function sendMouse(type, x, y, button) {
+        function sendMouse(type, x, y, button, delta) {
+            if (!controlEnabled) return;  // Control mode required
+            // Update cursor overlay position
+            updateCursorOverlay(x, y);
             if (ws && ws.readyState === WebSocket.OPEN && token) {
-                ws.send(JSON.stringify({ cmd: 'mouse', token, type, x, y, button: button || 0 }));
+                const msg = { cmd: 'mouse', token, type, x, y, button: button || 0 };
+                if (delta !== undefined) msg.delta = delta;
+                ws.send(JSON.stringify(msg));
+                // Debug: show sent message
+                console.log('[Mouse]', type, x, y, button);
             }
         }
 
         function sendKey(keyCode, isDown) {
+            if (!controlEnabled) return;  // Control mode required
             if (ws && ws.readyState === WebSocket.OPEN && token) {
                 ws.send(JSON.stringify({ cmd: 'key', token, keyCode, down: isDown }));
             }
@@ -1144,61 +1478,266 @@ inline std::string GetWebPageHTML() {
             touchIndicator.style.display = 'block';
             setTimeout(() => touchIndicator.style.display = 'none', 200);
         }
+)HTML";
 
+    // Part 15: JavaScript - Touch and mouse event handlers
+    html += R"HTML(
         canvas.addEventListener('touchstart', function(e) {
             e.preventDefault();
-            const touch = e.touches[0];
-            const pos = getTouchPos(touch);
-            touchState.lastX = pos.x;
-            touchState.lastY = pos.y;
-            touchState.isDragging = false;
+            e.stopPropagation();  // Prevent exiting fullscreen
+            touchState.touchCount = e.touches.length;
 
-            // Long press for right click
-            touchState.longPressTimer = setTimeout(() => {
-                showTouchIndicator(touch.clientX, touch.clientY);
-                sendMouse('down', pos.x, pos.y, 2);
-                sendMouse('up', pos.x, pos.y, 2);
-                touchState.longPressTimer = null;
-            }, 500);
+            if (e.touches.length === 2) {
+                // Two finger touch - start pinch zoom
+                zoomState.isPinching = true;
+                zoomState.lastPinchDist = getPinchDistance(e.touches);
+                const center = getPinchCenter(e.touches);
+                zoomState.pinchCenterX = center.x;
+                zoomState.pinchCenterY = center.y;
+
+                // Calculate pinch center relative to canvas for transform-origin
+                // Only set origin when starting a new zoom (scale == 1)
+                if (zoomState.scale === 1) {
+                    const rect = canvas.getBoundingClientRect();
+                    const relX = (center.x - rect.left) / rect.width * 100;
+                    const relY = (center.y - rect.top) / rect.height * 100;
+                    // Clamp to canvas bounds
+                    zoomState.originX = Math.max(0, Math.min(100, relX));
+                    zoomState.originY = Math.max(0, Math.min(100, relY));
+                }
+
+                // Cancel any pending single-touch actions
+                if (touchState.longPressTimer) {
+                    clearTimeout(touchState.longPressTimer);
+                    touchState.longPressTimer = null;
+                }
+                if (touchState.dragHoldTimer) {
+                    clearTimeout(touchState.dragHoldTimer);
+                    touchState.dragHoldTimer = null;
+                }
+                return;
+            }
+
+            // Single finger touch - touchpad mode
+            initCursor();
+            const touch = e.touches[0];
+            // Store screen coordinates for delta calculation
+            touchState.startX = touch.clientX;
+            touchState.startY = touch.clientY;
+            touchState.lastX = touch.clientX;
+            touchState.lastY = touch.clientY;
+            touchState.isDragging = false;
+            touchState.moved = false;
+            // Initialize pan center for zoom pan detection
+            zoomState.pinchCenterX = touch.clientX;
+            zoomState.pinchCenterY = touch.clientY;
+
+            // Clear any pending timers
+            if (touchState.dragHoldTimer) {
+                clearTimeout(touchState.dragHoldTimer);
+                touchState.dragHoldTimer = null;
+            }
+
+            const now = Date.now();
+            const timeSinceLastTap = now - touchState.lastTap;
+            const isDoubleTap = (timeSinceLastTap < 400);
+
+            if (isDoubleTap && controlEnabled) {
+                // Double-tap detected - wait to see if user holds (drag) or releases quickly (double-click)
+                // Microsoft RD style: tap-tap-hold = drag, tap-tap-release = double-click
+                touchState.dragHoldTimer = setTimeout(() => {
+                    // Finger still down after 150ms = start drag
+                    if (!touchState.moved) {
+                        touchState.isDragging = true;
+                        const x = Math.round(cursorState.x);
+                        const y = Math.round(cursorState.y);
+                        sendMouse('down', x, y, 0);
+                        const overlay = document.getElementById('cursor-overlay');
+                        overlay.style.filter = 'drop-shadow(2px 2px 3px rgba(0,0,0,0.6)) hue-rotate(90deg)';
+                        console.log('[Drag] Started at', x, y);
+                    }
+                    touchState.dragHoldTimer = null;
+                }, 150);  // 150ms delay before starting drag
+                touchState.lastTap = 0;  // Reset to prevent triple-tap
+            } else if (controlEnabled) {
+                // Single tap - set up for potential double-tap
+                // Long press (500ms) for right click
+                touchState.longPressTimer = setTimeout(() => {
+                    if (!touchState.moved) {
+                        clickAtCursor(2);  // Right click
+                        showTouchIndicator(touch.clientX, touch.clientY);
+                    }
+                    touchState.longPressTimer = null;
+                }, 500);
+            }
         }, { passive: false });
 
         canvas.addEventListener('touchmove', function(e) {
             e.preventDefault();
-            if (touchState.longPressTimer) {
-                clearTimeout(touchState.longPressTimer);
-                touchState.longPressTimer = null;
+            e.stopPropagation();  // Prevent exiting fullscreen
+
+            if (e.touches.length === 2 && zoomState.isPinching) {
+                // Two finger move - pinch zoom AND pan simultaneously
+                const newDist = getPinchDistance(e.touches);
+                const newCenter = getPinchCenter(e.touches);
+
+                // Calculate zoom
+                const delta = newDist / zoomState.lastPinchDist;
+                const newScale = Math.max(zoomState.minScale, Math.min(zoomState.maxScale, zoomState.scale * delta));
+
+                // Calculate pan (movement of pinch center)
+                if (zoomState.scale > 1 || newScale > 1) {
+                    const dx = newCenter.x - zoomState.pinchCenterX;
+                    const dy = newCenter.y - zoomState.pinchCenterY;
+                    zoomState.translateX += dx / zoomState.scale;
+                    zoomState.translateY += dy / zoomState.scale;
+                }
+
+                // Update state
+                zoomState.pinchCenterX = newCenter.x;
+                zoomState.pinchCenterY = newCenter.y;
+                zoomState.lastPinchDist = newDist;
+
+                if (newScale !== zoomState.scale) {
+                    zoomState.scale = newScale;
+                    showZoomIndicator();
+                }
+                applyZoomTransform();
+                return;
             }
+
+            if (e.touches.length === 1 && zoomState.scale > 1 && !touchState.isDragging && !controlEnabled) {
+                // Pan when zoomed (only when control mode is OFF - view-only mode)
+                const touch = e.touches[0];
+                const dx = touch.clientX - zoomState.pinchCenterX;
+                const dy = touch.clientY - zoomState.pinchCenterY;
+                // Only pan if finger moved significantly (prevents accidental pan on tap)
+                if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                    // Cancel tap detection since user is panning
+                    if (touchState.longPressTimer) {
+                        clearTimeout(touchState.longPressTimer);
+                        touchState.longPressTimer = null;
+                    }
+                    zoomState.translateX += dx / zoomState.scale;
+                    zoomState.translateY += dy / zoomState.scale;
+                    zoomState.pinchCenterX = touch.clientX;
+                    zoomState.pinchCenterY = touch.clientY;
+                    applyZoomTransform();
+                }
+                return;
+            }
+
+            // Single finger move - touchpad mode (relative cursor movement)
             const touch = e.touches[0];
-            const pos = getTouchPos(touch);
-            if (!touchState.isDragging) {
-                touchState.isDragging = true;
-                sendMouse('down', touchState.lastX, touchState.lastY, 0);
+            const dx = touch.clientX - touchState.lastX;
+            const dy = touch.clientY - touchState.lastY;
+
+            // Check if moved significantly (to distinguish tap from drag)
+            // Use higher threshold (20px) to allow for finger jitter during tap
+            const totalDx = touch.clientX - touchState.startX;
+            const totalDy = touch.clientY - touchState.startY;
+            const totalDist = Math.sqrt(totalDx * totalDx + totalDy * totalDy);
+            if (totalDist > 20) {
+                touchState.moved = true;
+                // Cancel long press if moving
+                if (touchState.longPressTimer) {
+                    clearTimeout(touchState.longPressTimer);
+                    touchState.longPressTimer = null;
+                }
+                // If dragHoldTimer is pending (double-tap detected), start drag immediately on movement
+                if (touchState.dragHoldTimer && !touchState.isDragging) {
+                    clearTimeout(touchState.dragHoldTimer);
+                    touchState.dragHoldTimer = null;
+                    // Start drag now
+                    touchState.isDragging = true;
+                    const x = Math.round(cursorState.x);
+                    const y = Math.round(cursorState.y);
+                    sendMouse('down', x, y, 0);
+                    const overlay = document.getElementById('cursor-overlay');
+                    overlay.style.filter = 'drop-shadow(2px 2px 3px rgba(0,0,0,0.6)) hue-rotate(90deg)';
+                    console.log('[Drag] Started early on movement at', x, y);
+                }
             }
-            sendMouse('move', pos.x, pos.y, 0);
-            touchState.lastX = pos.x;
-            touchState.lastY = pos.y;
+
+            // Convert screen delta to canvas delta
+            // getBoundingClientRect() always reflects current visual state (including CSS transform)
+            // This ensures correct calculation even during zoom transitions
+            const rect = canvas.getBoundingClientRect();
+            const canvasDx = dx * canvas.width / rect.width;
+            const canvasDy = dy * canvas.height / rect.height;
+
+            // Move cursor (touchpad mode)
+            if (touchState.isDragging) {
+                // Dragging: move cursor and send move events
+                moveCursorBy(canvasDx, canvasDy);
+            } else if (touchState.moved) {
+                // Just moving cursor (not dragging yet)
+                moveCursorBy(canvasDx, canvasDy);
+            }
+
+            touchState.lastX = touch.clientX;
+            touchState.lastY = touch.clientY;
         }, { passive: false });
 
         canvas.addEventListener('touchend', function(e) {
             e.preventDefault();
-            if (touchState.longPressTimer) {
+            e.stopPropagation();  // Prevent exiting fullscreen
+
+            // Handle pinch end
+            if (zoomState.isPinching) {
+                if (e.touches.length < 2) {
+                    zoomState.isPinching = false;
+                    // Update pan center for smooth transition to pan mode
+                    if (e.touches.length === 1) {
+                        zoomState.pinchCenterX = e.touches[0].clientX;
+                        zoomState.pinchCenterY = e.touches[0].clientY;
+                    }
+                }
+                touchState.touchCount = e.touches.length;
+                return;
+            }
+
+            // Reset cursor style
+            const overlay = document.getElementById('cursor-overlay');
+
+            if (touchState.isDragging) {
+                // End drag at cursor position
+                const x = Math.round(cursorState.x);
+                const y = Math.round(cursorState.y);
+                sendMouse('up', x, y, 0);
+                overlay.style.filter = 'drop-shadow(2px 2px 3px rgba(0,0,0,0.6))';
+                console.log('[Drag] Ended at', x, y);
+                touchState.lastTap = 0;  // Reset after drag
+            } else if (touchState.dragHoldTimer) {
+                // Double-tap but released before drag started = double click
+                clearTimeout(touchState.dragHoldTimer);
+                touchState.dragHoldTimer = null;
+                if (!touchState.moved) {
+                    console.log('[Tap] Double click');
+                    dblClickAtCursor();
+                }
+                touchState.lastTap = 0;
+            } else if (touchState.longPressTimer) {
                 clearTimeout(touchState.longPressTimer);
                 touchState.longPressTimer = null;
-                // Single tap = left click
-                const now = Date.now();
-                showTouchIndicator(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-                if (now - touchState.lastTap < 300) {
-                    // Double tap = double click
-                    sendMouse('down', touchState.lastX, touchState.lastY, 0);
-                    sendMouse('up', touchState.lastX, touchState.lastY, 0);
+                // Tap = click at cursor position (touchpad mode)
+                if (!touchState.moved) {
+                    const now = Date.now();
+                    // Visual feedback - flash cursor
+                    overlay.style.filter = 'drop-shadow(2px 2px 3px rgba(0,0,0,0.6)) brightness(2)';
+                    setTimeout(() => overlay.style.filter = 'drop-shadow(2px 2px 3px rgba(0,0,0,0.6))', 150);
+                    // Single tap = left click at cursor
+                    console.log('[Tap] Single click');
+                    clickAtCursor(0);
+                    touchState.lastTap = now;
+                } else {
+                    touchState.lastTap = 0;
                 }
-                sendMouse('down', touchState.lastX, touchState.lastY, 0);
-                sendMouse('up', touchState.lastX, touchState.lastY, 0);
-                touchState.lastTap = now;
-            } else if (touchState.isDragging) {
-                sendMouse('up', touchState.lastX, touchState.lastY, 0);
             }
+
             touchState.isDragging = false;
+            touchState.moved = false;
+            touchState.touchCount = e.touches.length;
         }, { passive: false });
 
         function toggleKeyboard() {
@@ -1211,37 +1750,64 @@ inline std::string GetWebPageHTML() {
                 sendMouse('up', touchState.lastX, touchState.lastY, 2);
             }
         }
+)HTML";
 
+    // Part 16: JavaScript - Desktop input and finalization
+    html += R"HTML(
         // Desktop mouse handling
-        canvas.addEventListener('mousedown', function(e) {
-            e.preventDefault();
+        let lastMouseMove = 0;
+        let lastMouseX = 0, lastMouseY = 0;
+
+        function getMousePos(e) {
             const rect = canvas.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
-            const x = Math.round((e.clientX - rect.left) * scaleX);
-            const y = Math.round((e.clientY - rect.top) * scaleY);
-            sendMouse('down', x, y, e.button);
+            return {
+                x: Math.round((e.clientX - rect.left) * scaleX),
+                y: Math.round((e.clientY - rect.top) * scaleY)
+            };
+        }
+
+        canvas.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            const pos = getMousePos(e);
+            sendMouse('down', pos.x, pos.y, e.button);
         });
 
         canvas.addEventListener('mouseup', function(e) {
             e.preventDefault();
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = Math.round((e.clientX - rect.left) * scaleX);
-            const y = Math.round((e.clientY - rect.top) * scaleY);
-            sendMouse('up', x, y, e.button);
+            const pos = getMousePos(e);
+            sendMouse('up', pos.x, pos.y, e.button);
+        });
+
+        canvas.addEventListener('dblclick', function(e) {
+            e.preventDefault();
+            const pos = getMousePos(e);
+            sendMouse('dblclick', pos.x, pos.y, e.button);
         });
 
         canvas.addEventListener('mousemove', function(e) {
-            if (e.buttons === 0) return;
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = Math.round((e.clientX - rect.left) * scaleX);
-            const y = Math.round((e.clientY - rect.top) * scaleY);
-            sendMouse('move', x, y, 0);
+            const now = Date.now();
+            const pos = getMousePos(e);
+            // Always update cursor overlay for smooth visual feedback
+            updateCursorOverlay(pos.x, pos.y);
+            // Throttle network sends
+            const dx = Math.abs(pos.x - lastMouseX);
+            const dy = Math.abs(pos.y - lastMouseY);
+            const distSq = dx * dx + dy * dy;
+            const minInterval = distSq > 2500 ? 33 : 50;
+            if (now - lastMouseMove < minInterval && distSq < 100) return;
+            lastMouseMove = now;
+            lastMouseX = pos.x;
+            lastMouseY = pos.y;
+            sendMouse('move', pos.x, pos.y, 0);
         });
+
+        canvas.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            const pos = getMousePos(e);
+            sendMouse('wheel', pos.x, pos.y, 0, e.deltaY);
+        }, { passive: false });
 
         canvas.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -1286,6 +1852,15 @@ inline std::string GetWebPageHTML() {
         });
 
         function disconnect() {
+            // Reset control mode
+            controlEnabled = false;
+            const btnMouse = document.getElementById('btn-mouse');
+            const btnKeyboard = document.getElementById('btn-keyboard');
+            if (btnMouse) btnMouse.classList.remove('active');
+            if (btnKeyboard) btnKeyboard.disabled = true;
+            document.getElementById('screen-canvas').style.cursor = 'default';
+            document.getElementById('cursor-overlay').classList.remove('active');
+
             if (decoder) { try { decoder.close(); } catch(e) {} decoder = null; }
             if (ws && ws.readyState === WebSocket.OPEN && token) ws.send(JSON.stringify({ cmd: 'disconnect', token }));
             showPage('devices-page');
