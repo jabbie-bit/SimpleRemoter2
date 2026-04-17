@@ -412,6 +412,22 @@ inline std::string GetWebPageHTML() {
             line-height: 1;
         }
         .fullscreen-btn:hover { background: rgba(255,255,255,0.2); }
+        .toolbar-btn-bar {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: #fff;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 6px 10px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            line-height: 1;
+        }
+        .toolbar-btn-bar:hover { background: rgba(255,255,255,0.2); }
+        .toolbar-btn-bar.active { background: rgba(52,199,89,0.8); }
+        .toolbar-btn-bar.active:hover { background: rgba(52,199,89,1); }
+        .toolbar-btn-bar:disabled { opacity: 0.4; cursor: not-allowed; }
+        .toolbar-btn-bar:disabled:hover { background: rgba(255,255,255,0.1); }
         #screen-page:fullscreen .screen-toolbar { display: none; }
         #screen-page:-webkit-full-screen .screen-toolbar { display: none; }
         #screen-page:fullscreen .canvas-container { height: 100vh; }
@@ -439,11 +455,11 @@ inline std::string GetWebPageHTML() {
             object-fit: contain;
         }
         #screen-page.pseudo-fullscreen .toolbar-toggle {
-            display: block; /* Show toolbar toggle in fullscreen */
+            display: flex; /* Show toolbar toggle in fullscreen */
         }
         #screen-page:fullscreen .toolbar-toggle,
         #screen-page:-webkit-full-screen .toolbar-toggle {
-            display: block;
+            display: flex;
         }
         .compat-warning {
             background: linear-gradient(90deg, #ff9800, #f57c00);
@@ -505,7 +521,7 @@ inline std::string GetWebPageHTML() {
             height: 36px;
             border-radius: 50%;
             transition: all 0.15s;
-            display: flex;
+            display: none;  /* Hidden by default, shown in fullscreen */
             align-items: center;
             justify-content: center;
         }
@@ -580,6 +596,9 @@ inline std::string GetWebPageHTML() {
             .device-card .info-row { flex-direction: column; gap: 4px; }
             .toolbar-right { gap: 8px; }
             .mobile-btn { width: 44px; height: 44px; font-size: 18px; }
+            /* Small screens: hide toolbar buttons, show floating toggle */
+            .toolbar-btn-bar { display: none; }
+            .toolbar-toggle { display: flex; }
         }
     </style>
 </head>
@@ -630,6 +649,8 @@ inline std::string GetWebPageHTML() {
             </div>
             <div class="toolbar-right">
                 <span id="screen-status" class="screen-status connecting">Connecting...</span>
+                <button class="toolbar-btn-bar" id="btn-mouse-bar" onclick="toggleControl()" title="Mouse Control">&#x1F5B1;</button>
+                <button class="toolbar-btn-bar" id="btn-keyboard-bar" onclick="toggleKeyboard()" title="Keyboard" disabled>&#x2328;</button>
                 <button class="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen (F11)">&#x26F6;</button>
             </div>
         </div>
@@ -651,7 +672,7 @@ inline std::string GetWebPageHTML() {
     html += R"HTML(
     <script>
         let ws = null, token = null, decoder = null, devices = [], currentDevice = null;
-        let frameCount = 0, lastFrameTime = 0, fps = 0;
+        let frameCount = 0, lastFrameTime = 0, fps = 0, pingInterval = null;
         const canvas = document.getElementById('screen-canvas');
         const ctx = canvas.getContext('2d');
 
@@ -739,13 +760,14 @@ inline std::string GetWebPageHTML() {
             ws.binaryType = 'arraybuffer';
             ws.onopen = () => {
                 updateWsStatus('connected');
+                startPingInterval();
                 // Auto-restore session if token exists
                 if (token) {
                     showPage('devices-page');
                     getDevices();
                 }
             };
-            ws.onclose = () => { updateWsStatus('disconnected'); setTimeout(connectWebSocket, 3000); };
+            ws.onclose = () => { stopPingInterval(); updateWsStatus('disconnected'); setTimeout(connectWebSocket, 3000); };
             ws.onerror = (e) => console.error('WS error:', e);
             ws.onmessage = (event) => {
                 if (typeof event.data === 'string') handleSignaling(JSON.parse(event.data));
@@ -1244,16 +1266,22 @@ inline std::string GetWebPageHTML() {
 
         function toggleControl() {
             controlEnabled = !controlEnabled;
+            // Update floating toolbar buttons
             const btnMouse = document.getElementById('btn-mouse');
             const btnKeyboard = document.getElementById('btn-keyboard');
-            const cursorOverlay = document.getElementById('cursor-overlay');
             btnMouse.classList.toggle('active', controlEnabled);
             btnKeyboard.disabled = !controlEnabled;
+            // Update top toolbar buttons (sync state)
+            const btnMouseBar = document.getElementById('btn-mouse-bar');
+            const btnKeyboardBar = document.getElementById('btn-keyboard-bar');
+            btnMouseBar.classList.toggle('active', controlEnabled);
+            btnKeyboardBar.disabled = !controlEnabled;
+            // Cursor handling
             const canvas = document.getElementById('screen-canvas');
-            // Hide local cursor when control enabled
-            canvas.style.cursor = controlEnabled ? 'none' : 'default';
-            // Only show cursor overlay on touch devices (touchpad mode)
-            // On desktop, remote screen already shows the cursor
+            const cursorOverlay = document.getElementById('cursor-overlay');
+            // Touch devices: hide browser cursor, show overlay (touchpad mode)
+            // Desktop: keep browser cursor visible, no overlay needed (remote shows cursor)
+            canvas.style.cursor = (controlEnabled && isTouchDevice) ? 'none' : 'default';
             cursorOverlay.classList.toggle('active', controlEnabled && isTouchDevice);
         }
 
@@ -1745,10 +1773,11 @@ inline std::string GetWebPageHTML() {
         }
 
         function sendRightClick() {
-            if (touchState.lastX && touchState.lastY) {
-                sendMouse('down', touchState.lastX, touchState.lastY, 2);
-                sendMouse('up', touchState.lastX, touchState.lastY, 2);
-            }
+            // Use cursor position (canvas coordinates), not touch position (screen coordinates)
+            const x = Math.round(cursorState.x);
+            const y = Math.round(cursorState.y);
+            sendMouse('down', x, y, 2);
+            sendMouse('up', x, y, 2);
         }
 )HTML";
 
@@ -1854,12 +1883,26 @@ inline std::string GetWebPageHTML() {
         function disconnect() {
             // Reset control mode
             controlEnabled = false;
+            // Reset floating toolbar buttons
             const btnMouse = document.getElementById('btn-mouse');
             const btnKeyboard = document.getElementById('btn-keyboard');
             if (btnMouse) btnMouse.classList.remove('active');
             if (btnKeyboard) btnKeyboard.disabled = true;
+            // Reset top toolbar buttons
+            const btnMouseBar = document.getElementById('btn-mouse-bar');
+            const btnKeyboardBar = document.getElementById('btn-keyboard-bar');
+            if (btnMouseBar) btnMouseBar.classList.remove('active');
+            if (btnKeyboardBar) btnKeyboardBar.disabled = true;
             document.getElementById('screen-canvas').style.cursor = 'default';
             document.getElementById('cursor-overlay').classList.remove('active');
+
+            // Reset zoom state
+            zoomState.scale = 1;
+            zoomState.translateX = 0;
+            zoomState.translateY = 0;
+            zoomState.isPinching = false;
+            canvas.style.transform = '';
+            canvas.style.transformOrigin = '';
 
             if (decoder) { try { decoder.close(); } catch(e) {} decoder = null; }
             if (ws && ws.readyState === WebSocket.OPEN && token) ws.send(JSON.stringify({ cmd: 'disconnect', token }));
@@ -1873,9 +1916,15 @@ inline std::string GetWebPageHTML() {
             return div.innerHTML;
         }
 
-        setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN && token) ws.send(JSON.stringify({ cmd: 'ping', token }));
-        }, 30000);
+        function startPingInterval() {
+            if (pingInterval) clearInterval(pingInterval);
+            pingInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN && token) ws.send(JSON.stringify({ cmd: 'ping', token }));
+            }, 30000);
+        }
+        function stopPingInterval() {
+            if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+        }
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && document.querySelector('.page.active').id === 'login-page') login();
